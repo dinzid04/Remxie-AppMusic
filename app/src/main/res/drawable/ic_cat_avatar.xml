@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="64dp"
+    android:height="64dp"
+    android:viewportWidth="64"
+    android:viewportHeight="64">
+    <!-- Dark backdrop -->
+    <path
+        android:fillColor="#FF232528"
+        android:pathData="M0,0h64v64h-64z" />
+    <!-- Left ear outer -->
+    <path
+        android:fillColor="#FFE5E5EA"
+        android:pathData="M14,28 L12,11 L27,19 Z" />
+    <!-- Left ear inner pink -->
+    <path
+        android:fillColor="#FFF4A6B8"
+        android:pathData="M16,25 L15,14 L24,20 Z" />
+    <!-- Right ear outer -->
+    <path
+        android:fillColor="#FFE5E5EA"
+        android:pathData="M50,28 L52,11 L37,19 Z" />
+    <!-- Right ear inner pink -->
+    <path
+        android:fillColor="#FFF4A6B8"
+        android:pathData="M48,25 L49,14 L40,20 Z" />
+    <!-- Fluffy white cat head -->
+    <path
+        android:fillColor="#FFFAFAFC"
+        android:pathData="M32,16 C18,16 10,25 10,37 C10,49 19,56 32,56 C45,56 54,49 54,37 C54,25 46,16 32,16 Z" />
+    <!-- Subtle grey fur patches on top of head -->
+    <path
+        android:fillColor="#FF8E8E93"
+        android:pathData="M20,18 C24,16 28,16 30,21 C26,22 21,21 20,18 Z" />
+    <path
+        android:fillColor="#FF8E8E93"
+        android:pathData="M44,18 C40,16 36,16 34,21 C38,22 43,21 44,18 Z" />
+    <!-- Left eye -->
+    <path
+        android:fillColor="#FF2C2C2E"
+        android:pathData="M23,34 m-3.5,0 a3.5,3.5 0 1,0 7,0 a3.5,3.5 0 1,0 -7,0" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M21.8,32.8 m-1.1,0 a1.1,1.1 0 1,0 2.2,0 a1.1,1.1 0 1,0 -2.2,0" />
+    <!-- Right eye -->
+    <path
+        android:fillColor="#FF2C2C2E"
+        android:pathData="M41,34 m-3.5,0 a3.5,3.5 0 1,0 7,0 a3.5,3.5 0 1,0 -7,0" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M39.8,32.8 m-1.1,0 a1.1,1.1 0 1,0 2.2,0 a1.1,1.1 0 1,0 -2.2,0" />
+    <!-- Cute pink nose -->
+    <path
+        android:fillColor="#FFF28B9F"
+        android:pathData="M29.5,39.5 L34.5,39.5 L32,42.5 Z" />
+    <!-- Mouth curves -->
+    <path
+        android:strokeColor="#FF636366"
+        android:strokeWidth="1.4"
+        android:strokeLineCap="round"
+        android:pathData="M32,42.5 C32,45 29,46 27,44.5 M32,42.5 C32,45 35,46 37,44.5" />
+</vector>

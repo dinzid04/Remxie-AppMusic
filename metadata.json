@@ -1,0 +1,8 @@
+{
+  "name": "Remix BitChord",
+  "description": "Aplikasi streaming musik bergaya Pure OLED Dark dengan kurasi lagu, playlist komunitas, hits Indonesia, dan pemutar audio terintegrasi.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

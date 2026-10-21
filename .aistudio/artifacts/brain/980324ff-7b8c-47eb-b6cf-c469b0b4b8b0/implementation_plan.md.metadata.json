@@ -1,0 +1,6 @@
+{
+  "summary": "Rencana implementasi untuk pembaruan Font Sans-Serif Bold/ExtraBold menyeluruh, halaman Perpustakaan (Library) sesuai referensi screenshot dengan manajemen playlist lengkap (Buat, Impor, Disukai, Pin, Rename, Delete, Tambah Lagu), fitur Download Musik Offline (per lagu & satu playlist/album) dengan bar persentase di Notifikasi sistem, serta optimasi performa 60/120 FPS bebas lag/frame drop saat scrolling dan swiping.",
+  "updatedAt": "2026-10-19T14:13:20.152872868Z",
+  "requestFeedback": true,
+  "userFacing": true
+}

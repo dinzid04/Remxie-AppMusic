@@ -1,0 +1,16 @@
+<resources>
+    <string name="app_name">BitChord</string>
+    <string name="nav_home">Home</string>
+    <string name="nav_library">Library</string>
+    <string name="nav_search">Search</string>
+    <string name="listen_now">Listen Now</string>
+    <string name="play_now">Putar Sekarang</string>
+    <string name="remove_from_recents">Hapus dari Pintasan Cepat</string>
+    <string name="clear_recents">Bersihkan semua pintasan</string>
+    <string name="home_tab">Home</string>
+    <string name="search_tab">Search</string>
+    <string name="library_tab">Perpustakaan</string>
+    <string name="settings_title">Setelan</string>
+    <string name="integrations_title">Account &amp; Integrations</string>
+</resources>
+
