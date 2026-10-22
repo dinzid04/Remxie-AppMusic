@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -59,11 +60,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -90,6 +94,7 @@ import com.example.ui.theme.CardPlaceholderDark
 import com.example.ui.theme.PlusJakartaSans
 import com.example.ui.theme.TextPrimaryWhite
 import com.example.ui.theme.TextSecondaryGrey
+import com.example.ui.theme.rememberDominantAccentColor
 import kotlinx.coroutines.delay
 
 private val EMOJI_STRIP_REGEX = Regex("[\\p{So}\\p{Cn}\\uFE0F\\u200D]+")
@@ -248,11 +253,13 @@ fun PintasanCepatGridSection(
 
         Spacer(modifier = Modifier.height(6.dp))
 
+        val screenWidthDp = LocalConfiguration.current.screenWidthDp.dp
+        val cellSize = remember(screenWidthDp) {
+            ((screenWidthDp - 48.dp) / 3f).coerceIn(96.dp, 134.dp)
+        }
         val firstPageRows = pages.firstOrNull()?.chunked(3)?.size ?: 1
-        val gridHeight = when (firstPageRows) {
-            1 -> 108.dp
-            2 -> 214.dp
-            else -> 322.dp
+        val gridHeight = remember(cellSize, firstPageRows) {
+            (cellSize * firstPageRows) + (8.dp * (firstPageRows - 1).coerceAtLeast(0))
         }
 
         HorizontalPager(
@@ -274,7 +281,7 @@ fun PintasanCepatGridSection(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(102.dp),
+                            .height(cellSize),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         for (colIdx in 0 until 3) {
@@ -285,13 +292,13 @@ fun PintasanCepatGridSection(
                                     onClick = { onItemClick(item) },
                                     modifier = Modifier
                                         .weight(1f)
-                                        .fillMaxSize()
+                                        .aspectRatio(1f)
                                 )
                             } else {
                                 Spacer(
                                     modifier = Modifier
                                         .weight(1f)
-                                        .fillMaxSize()
+                                        .aspectRatio(1f)
                                 )
                             }
                         }
@@ -1357,12 +1364,27 @@ fun HitsIndonesiaSpotlightSection(
     val heroItem = section.items.firstOrNull() ?: return
     val rankedItems = remember(section.items) { section.items.drop(1).take(3) }
 
-    val heroImgReq = remember(context, heroItem.ultraResThumbnail) {
+    val extractedHeroAccent = rememberDominantAccentColor(
+        imageUrl = heroItem.smallThumbnail,
+        defaultColor = Color(0xFF5A2538)
+    )
+    val heroCardBase = remember(extractedHeroAccent) {
+        Color(
+            red = (extractedHeroAccent.red * 0.28f).coerceIn(0f, 1f),
+            green = (extractedHeroAccent.green * 0.28f).coerceIn(0f, 1f),
+            blue = (extractedHeroAccent.blue * 0.28f).coerceIn(0f, 1f),
+            alpha = 1f
+        )
+    }
+
+    val heroImgReq = remember(context, heroItem.highResThumbnail) {
         ImageRequest.Builder(context)
-            .data(heroItem.ultraResThumbnail)
-            .size(600, 600)
+            .data(heroItem.highResThumbnail)
+            .size(380, 380)
             .allowHardware(true)
             .crossfade(false)
+            .memoryCachePolicy(CachePolicy.ENABLED)
+            .diskCachePolicy(CachePolicy.ENABLED)
             .build()
     }
 
@@ -1381,27 +1403,42 @@ fun HitsIndonesiaSpotlightSection(
 
         Spacer(modifier = Modifier.height(14.dp))
 
-        // Hero Card (#1 Lagu Terpopuler)
+        // Hero Card (#1 Hits Indonesia — no "LAGU TERPOPULER" badge, seamless horizontal & vertical blend)
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp)
-                .height(198.dp)
+                .height(194.dp)
                 .clip(RoundedCornerShape(24.dp))
-                .background(Color(0xFF1A171E))
-                .border(1.dp, Color(0xFF2D2733), RoundedCornerShape(24.dp))
+                .background(heroCardBase)
+                .border(1.dp, Color.White.copy(alpha = 0.10f), RoundedCornerShape(24.dp))
                 .clickable { onItemClick(heroItem) }
                 .testTag("hits_indonesia_hero_card")
         ) {
-            // Right-aligned artwork with smooth left gradient fade
+            // Right-aligned artwork with offscreen alpha feathering so there is zero hard border
             AsyncImage(
                 model = heroImgReq,
                 contentDescription = heroItem.title,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
                     .align(Alignment.CenterEnd)
-                    .fillMaxWidth(0.68f)
+                    .fillMaxWidth(0.74f)
                     .fillMaxHeight()
+                    .graphicsLayer {
+                        compositingStrategy = CompositingStrategy.Offscreen
+                    }
+                    .drawWithContent {
+                        drawContent()
+                        drawRect(
+                            brush = Brush.horizontalGradient(
+                                0.0f to Color.Transparent,
+                                0.22f to Color.Black.copy(alpha = 0.28f),
+                                0.50f to Color.Black.copy(alpha = 0.78f),
+                                1.0f to Color.Black
+                            ),
+                            blendMode = BlendMode.DstIn
+                        )
+                    }
             )
 
             Box(
@@ -1409,12 +1446,10 @@ fun HitsIndonesiaSpotlightSection(
                     .fillMaxSize()
                     .background(
                         Brush.horizontalGradient(
-                            colors = listOf(
-                                Color(0xFF1A161D),
-                                Color(0xF21A161D),
-                                Color(0xB31A161D),
-                                Color(0x331A161D)
-                            )
+                            0.0f to heroCardBase,
+                            0.38f to heroCardBase.copy(alpha = 0.92f),
+                            0.68f to heroCardBase.copy(alpha = 0.52f),
+                            1.0f to heroCardBase.copy(alpha = 0.18f)
                         )
                     )
             )
@@ -1422,28 +1457,10 @@ fun HitsIndonesiaSpotlightSection(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(18.dp),
+                    .padding(20.dp),
                 verticalArrangement = Arrangement.SpaceBetween
             ) {
-                Column(modifier = Modifier.fillMaxWidth(0.75f)) {
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(50))
-                            .background(Color(0xFFE9385A))
-                            .padding(horizontal = 10.dp, vertical = 4.dp)
-                    ) {
-                        Text(
-                            text = "LAGU TERPOPULER",
-                            fontFamily = PlusJakartaSans,
-                            fontWeight = FontWeight.ExtraBold,
-                            fontSize = 10.sp,
-                            letterSpacing = 0.5.sp,
-                            color = Color.White
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
+                Column(modifier = Modifier.fillMaxWidth(0.76f)) {
                     Text(
                         text = heroItem.title,
                         fontFamily = PlusJakartaSans,
@@ -1455,7 +1472,7 @@ fun HitsIndonesiaSpotlightSection(
                         overflow = TextOverflow.Ellipsis
                     )
 
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
 
                     Text(
                         text = heroItem.reason ?: "Kisah cinta dan melodi populer yang sedang memuncaki tangga lagu Indonesia.",
@@ -1463,7 +1480,7 @@ fun HitsIndonesiaSpotlightSection(
                         fontWeight = FontWeight.Medium,
                         fontSize = 12.5.sp,
                         lineHeight = 16.sp,
-                        color = Color.White.copy(alpha = 0.78f),
+                        color = Color.White.copy(alpha = 0.82f),
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -1478,7 +1495,7 @@ fun HitsIndonesiaSpotlightSection(
                     Row(
                         modifier = Modifier
                             .clip(RoundedCornerShape(50))
-                            .background(Color.Black.copy(alpha = 0.52f))
+                            .background(Color.Black.copy(alpha = 0.48f))
                             .border(1.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(50))
                             .padding(horizontal = 10.dp, vertical = 5.dp),
                         verticalAlignment = Alignment.CenterVertically
@@ -1624,6 +1641,19 @@ fun NewReleasesBentoSection(
     val rightTopItem = section.items.getOrNull(1) ?: featuredItem
     val rightBottomItem = section.items.getOrNull(2) ?: rightTopItem
 
+    val featuredAccent = rememberDominantAccentColor(
+        imageUrl = featuredItem.smallThumbnail,
+        defaultColor = Color(0xFF4A2C40)
+    )
+    val featuredCardBg = remember(featuredAccent) {
+        Color(
+            red = (featuredAccent.red * 0.28f).coerceIn(0f, 1f),
+            green = (featuredAccent.green * 0.28f).coerceIn(0f, 1f),
+            blue = (featuredAccent.blue * 0.28f).coerceIn(0f, 1f),
+            alpha = 1f
+        )
+    }
+
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -1646,99 +1676,126 @@ fun NewReleasesBentoSection(
                 .height(242.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Left Vertical Featured Card
+            // Left Vertical Featured Card with seamless opacity/blur gradient blend into adaptive card color
             val leftReq = remember(context, featuredItem.highResThumbnail) {
                 ImageRequest.Builder(context)
                     .data(featuredItem.highResThumbnail)
-                    .size(360, 360)
+                    .size(320, 320)
                     .allowHardware(true)
                     .crossfade(false)
+                    .memoryCachePolicy(CachePolicy.ENABLED)
+                    .diskCachePolicy(CachePolicy.ENABLED)
                     .build()
             }
 
-            Column(
+            Box(
                 modifier = Modifier
                     .weight(0.47f)
                     .fillMaxHeight()
                     .clip(RoundedCornerShape(22.dp))
-                    .background(Color(0xFF15151B))
-                    .border(1.dp, Color(0xFF252530), RoundedCornerShape(22.dp))
+                    .background(featuredCardBg)
+                    .border(1.dp, Color.White.copy(alpha = 0.10f), RoundedCornerShape(22.dp))
                     .clickable { onItemClick(featuredItem) }
             ) {
-                Box(
+                // Full-width top cover artwork that feathers seamlessly into featuredCardBg (zero hard border!)
+                AsyncImage(
+                    model = leftReq,
+                    contentDescription = featuredItem.title,
+                    contentScale = ContentScale.Crop,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(142.dp)
-                ) {
-                    AsyncImage(
-                        model = leftReq,
-                        contentDescription = featuredItem.title,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize()
-                    )
+                        .fillMaxHeight(0.78f)
+                        .align(Alignment.TopCenter)
+                        .graphicsLayer {
+                            compositingStrategy = CompositingStrategy.Offscreen
+                        }
+                        .drawWithContent {
+                            drawContent()
+                            drawRect(
+                                brush = Brush.verticalGradient(
+                                    0.0f to Color.Black,
+                                    0.46f to Color.Black,
+                                    0.72f to Color.Black.copy(alpha = 0.52f),
+                                    0.90f to Color.Black.copy(alpha = 0.14f),
+                                    1.0f to Color.Transparent
+                                ),
+                                blendMode = BlendMode.DstIn
+                            )
+                        }
+                )
 
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.TopStart)
-                            .padding(10.dp)
-                            .clip(RoundedCornerShape(50))
-                            .background(Color.Black.copy(alpha = 0.68f))
-                            .padding(horizontal = 10.dp, vertical = 4.dp)
-                    ) {
-                        Text(
-                            text = "Baru",
-                            fontFamily = PlusJakartaSans,
-                            fontWeight = FontWeight.ExtraBold,
-                            fontSize = 10.5.sp,
-                            color = Color.White
-                        )
-                    }
-                }
-
-                Column(
+                // Soft atmospheric gradient wash
+                Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(horizontal = 12.dp, vertical = 10.dp),
-                    verticalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Column {
-                        Text(
-                            text = featuredItem.title,
-                            fontFamily = PlusJakartaSans,
-                            fontWeight = FontWeight.ExtraBold,
-                            fontSize = 16.5.sp,
-                            color = Color.White,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                        .background(
+                            Brush.verticalGradient(
+                                0.0f to Color.Black.copy(alpha = 0.14f),
+                                0.35f to Color.Transparent,
+                                0.62f to featuredCardBg.copy(alpha = 0.72f),
+                                0.80f to featuredCardBg.copy(alpha = 0.96f),
+                                1.0f to featuredCardBg
+                            )
                         )
-                        Text(
-                            text = featuredItem.cleanArtist,
-                            fontFamily = PlusJakartaSans,
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 12.5.sp,
-                            color = TextSecondaryGrey,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
+                )
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.Start,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "Album • Pop",
-                            fontFamily = PlusJakartaSans,
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 11.5.sp,
-                            color = TextSecondaryGrey
-                        )
-                    }
+                // "Baru" badge
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(10.dp)
+                        .clip(RoundedCornerShape(50))
+                        .background(Color.Black.copy(alpha = 0.58f))
+                        .border(1.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(50))
+                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        text = "Baru",
+                        fontFamily = PlusJakartaSans,
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 10.5.sp,
+                        color = Color.White
+                    )
+                }
+
+                // Bottom info anchored in the seamless gradient zone
+                Column(
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .fillMaxWidth()
+                        .padding(horizontal = 13.dp, vertical = 12.dp)
+                ) {
+                    Text(
+                        text = featuredItem.title,
+                        fontFamily = PlusJakartaSans,
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 16.5.sp,
+                        color = Color.White,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = featuredItem.cleanArtist,
+                        fontFamily = PlusJakartaSans,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 12.5.sp,
+                        color = Color.White.copy(alpha = 0.80f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "Album • Pop",
+                        fontFamily = PlusJakartaSans,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 11.5.sp,
+                        color = Color.White.copy(alpha = 0.60f)
+                    )
                 }
             }
 
-            // Right Column: 2 Stacked Horizontal Cards
+            // Right Column: 2 Stacked Horizontal Cards with seamless horizontal opacity/color blend
             Column(
                 modifier = Modifier
                     .weight(0.53f)
@@ -1746,44 +1803,89 @@ fun NewReleasesBentoSection(
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 listOf(rightTopItem, rightBottomItem).forEach { item ->
+                    val itemAccent = rememberDominantAccentColor(
+                        imageUrl = item.smallThumbnail,
+                        defaultColor = Color(0xFF283044)
+                    )
+                    val rightCardBg = remember(itemAccent) {
+                        Color(
+                            red = (itemAccent.red * 0.28f).coerceIn(0f, 1f),
+                            green = (itemAccent.green * 0.28f).coerceIn(0f, 1f),
+                            blue = (itemAccent.blue * 0.28f).coerceIn(0f, 1f),
+                            alpha = 1f
+                        )
+                    }
                     val rightReq = remember(context, item.smallThumbnail) {
                         ImageRequest.Builder(context)
                             .data(item.smallThumbnail)
-                            .size(200, 200)
+                            .size(220, 220)
                             .allowHardware(true)
                             .crossfade(false)
+                            .memoryCachePolicy(CachePolicy.ENABLED)
+                            .diskCachePolicy(CachePolicy.ENABLED)
                             .build()
                     }
 
-                    Row(
+                    Box(
                         modifier = Modifier
                             .fillMaxWidth()
                             .weight(1f)
                             .clip(RoundedCornerShape(20.dp))
-                            .background(Color(0xFF15151B))
-                            .border(1.dp, Color(0xFF252530), RoundedCornerShape(20.dp))
+                            .background(rightCardBg)
+                            .border(1.dp, Color.White.copy(alpha = 0.10f), RoundedCornerShape(20.dp))
                             .clickable { onItemClick(item) }
-                            .padding(10.dp),
-                        verticalAlignment = Alignment.CenterVertically
                     ) {
+                        // Left artwork seamlessly fading into rightCardBg (no hard box border!)
                         AsyncImage(
                             model = rightReq,
                             contentDescription = item.title,
                             contentScale = ContentScale.Crop,
                             modifier = Modifier
-                                .size(76.dp)
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(CardPlaceholderDark)
+                                .align(Alignment.CenterStart)
+                                .fillMaxWidth(0.60f)
+                                .fillMaxHeight()
+                                .graphicsLayer {
+                                    compositingStrategy = CompositingStrategy.Offscreen
+                                }
+                                .drawWithContent {
+                                    drawContent()
+                                    drawRect(
+                                        brush = Brush.horizontalGradient(
+                                            0.0f to Color.Black,
+                                            0.42f to Color.Black.copy(alpha = 0.82f),
+                                            0.76f to Color.Black.copy(alpha = 0.28f),
+                                            1.0f to Color.Transparent
+                                        ),
+                                        blendMode = BlendMode.DstIn
+                                    )
+                                }
                         )
 
-                        Spacer(modifier = Modifier.width(10.dp))
+                        // Smooth horizontal gradient wash into rightCardBg
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(
+                                    Brush.horizontalGradient(
+                                        0.0f to Color.Black.copy(alpha = 0.15f),
+                                        0.28f to rightCardBg.copy(alpha = 0.55f),
+                                        0.52f to rightCardBg.copy(alpha = 0.92f),
+                                        1.0f to rightCardBg
+                                    )
+                                )
+                        )
 
-                        Box(modifier = Modifier.fillMaxSize()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 12.dp, vertical = 10.dp)
+                        ) {
                             Box(
                                 modifier = Modifier
                                     .align(Alignment.TopEnd)
                                     .clip(RoundedCornerShape(50))
-                                    .background(Color(0xFF252530))
+                                    .background(Color.Black.copy(alpha = 0.45f))
+                                    .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(50))
                                     .padding(horizontal = 8.dp, vertical = 2.dp)
                             ) {
                                 Text(
@@ -1791,14 +1893,15 @@ fun NewReleasesBentoSection(
                                     fontFamily = PlusJakartaSans,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 9.5.sp,
-                                    color = Color.White.copy(alpha = 0.85f)
+                                    color = Color.White.copy(alpha = 0.90f)
                                 )
                             }
 
                             Column(
                                 modifier = Modifier
-                                    .align(Alignment.CenterStart)
-                                    .padding(top = 6.dp, end = 4.dp)
+                                    .align(Alignment.CenterEnd)
+                                    .fillMaxWidth(0.66f)
+                                    .padding(top = 6.dp)
                             ) {
                                 Text(
                                     text = item.title,
@@ -1816,7 +1919,7 @@ fun NewReleasesBentoSection(
                                     fontFamily = PlusJakartaSans,
                                     fontWeight = FontWeight.SemiBold,
                                     fontSize = 11.5.sp,
-                                    color = TextSecondaryGrey,
+                                    color = Color.White.copy(alpha = 0.78f),
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
@@ -1824,8 +1927,8 @@ fun NewReleasesBentoSection(
 
                             Row(
                                 modifier = Modifier
-                                    .align(Alignment.BottomStart)
-                                    .fillMaxWidth(),
+                                    .align(Alignment.BottomEnd)
+                                    .fillMaxWidth(0.66f),
                                 horizontalArrangement = Arrangement.Start,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
@@ -1834,7 +1937,7 @@ fun NewReleasesBentoSection(
                                     fontFamily = PlusJakartaSans,
                                     fontWeight = FontWeight.SemiBold,
                                     fontSize = 10.5.sp,
-                                    color = TextSecondaryGrey
+                                    color = Color.White.copy(alpha = 0.60f)
                                 )
                             }
                         }

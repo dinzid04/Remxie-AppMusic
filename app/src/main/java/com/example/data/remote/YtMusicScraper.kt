@@ -586,12 +586,12 @@ class YtMusicScraper {
                         ?.takeIf { it.isNotBlank() }
 
                     val rawTrackThumb = extractBestThumbnailUrl(ir)
-                    val upgradedTrackThumb = MusicItem.upgradeThumbnailUrl(rawTrackThumb, videoId, MusicItem.Quality.HIGH)
+                    val upgradedTrackThumb = MusicItem.upgradeThumbnailUrl(rawTrackThumb, videoId, MusicItem.Quality.SMALL)
                         .ifBlank {
                             if (!videoId.isNullOrBlank()) {
-                                "https://i.ytimg.com/vi/$videoId/hqdefault.jpg"
+                                "https://i.ytimg.com/vi/$videoId/mqdefault.jpg"
                             } else {
-                                MusicItem.upgradeThumbnailUrl(rawHeaderThumb ?: seedItem.thumbnailUrl, null, MusicItem.Quality.HIGH)
+                                MusicItem.upgradeThumbnailUrl(rawHeaderThumb ?: seedItem.thumbnailUrl, null, MusicItem.Quality.SMALL)
                             }
                         }
 
@@ -1091,6 +1091,7 @@ class YtMusicScraper {
         if (cleanQuery.isBlank()) return@withContext emptyList()
 
         val grouped = LinkedHashMap<String, MutableList<MusicItem>>().apply {
+            put("Top result", mutableListOf())
             put("Songs", mutableListOf())
             put("Videos", mutableListOf())
             put("Albums", mutableListOf())
@@ -1123,7 +1124,7 @@ class YtMusicScraper {
                 try { searchByFilter(cleanQuery, filter = "playlists", hl = hl, gl = gl) } catch (_: Exception) { emptyList() }
             }
 
-            // First merge any categorized shelves from unfiltered search (excluding Top result)
+            // First merge any Top result card shelf and categorized shelves from unfiltered search
             val unfilteredData = unfilteredDeferred.await()
             val sections = unfilteredData?.optJSONObject("contents")
                 ?.optJSONObject("tabbedSearchResultsRenderer")
@@ -1137,12 +1138,19 @@ class YtMusicScraper {
             if (sections != null) {
                 for (i in 0 until sections.length()) {
                     val s = sections.optJSONObject(i) ?: continue
+                    val cardShelf = s.optJSONObject("musicCardShelfRenderer")
+                    if (cardShelf != null) {
+                        parseTopResultCardShelf(cardShelf)?.let { topItems ->
+                            grouped.getOrPut("Top result") { mutableListOf() }.addAll(topItems)
+                        }
+                        continue
+                    }
+
                     val shelf = s.optJSONObject("musicShelfRenderer") ?: continue
                     val rawCatTitle = joinRunsText(shelf.optJSONObject("title")?.optJSONArray("runs"))
                         ?.let { stripEmojis(it) }
                         .orEmpty()
                     val catTitle = normalizeSearchCategoryTitle(rawCatTitle)
-                    if (catTitle == "Top result") continue
 
                     val contents = shelf.optJSONArray("contents") ?: continue
                     for (j in 0 until contents.length()) {
@@ -1155,11 +1163,42 @@ class YtMusicScraper {
             }
 
             // Merge full filtered results so Songs, Videos, Albums, Artists, and Playlists are all guaranteed present
-            grouped.getOrPut("Songs") { mutableListOf() }.addAll(songsDeferred.await())
-            grouped.getOrPut("Videos") { mutableListOf() }.addAll(videosDeferred.await())
-            grouped.getOrPut("Albums") { mutableListOf() }.addAll(albumsDeferred.await())
-            grouped.getOrPut("Artists") { mutableListOf() }.addAll(artistsDeferred.await())
-            grouped.getOrPut("Playlists") { mutableListOf() }.addAll(playlistsDeferred.await())
+            val songsList = songsDeferred.await()
+            val videosList = videosDeferred.await()
+            val albumsList = albumsDeferred.await()
+            val artistsList = artistsDeferred.await()
+            val playlistsList = playlistsDeferred.await()
+
+            grouped.getOrPut("Songs") { mutableListOf() }.addAll(songsList)
+            grouped.getOrPut("Videos") { mutableListOf() }.addAll(videosList)
+            grouped.getOrPut("Albums") { mutableListOf() }.addAll(albumsList)
+            grouped.getOrPut("Artists") { mutableListOf() }.addAll(artistsList)
+            grouped.getOrPut("Playlists") { mutableListOf() }.addAll(playlistsList)
+
+            // Ensure "Top result" always has a primary hero item + up to 3 related songs
+            val topBucket = grouped.getOrPut("Top result") { mutableListOf() }
+            val allSongs = grouped["Songs"].orEmpty()
+            val allArtists = grouped["Artists"].orEmpty()
+            val allAlbums = grouped["Albums"].orEmpty()
+
+            if (topBucket.isEmpty()) {
+                val exactArtist = allArtists.firstOrNull {
+                    it.title.equals(cleanQuery, ignoreCase = true)
+                }
+                val primaryHero = exactArtist
+                    ?: allSongs.firstOrNull()
+                    ?: allArtists.firstOrNull()
+                    ?: allAlbums.firstOrNull()
+                if (primaryHero != null) {
+                    topBucket.add(primaryHero)
+                }
+            }
+
+            if (topBucket.isNotEmpty() && topBucket.size < 4) {
+                val heroId = topBucket.first().id
+                val relatedSongs = allSongs.filter { it.id != heroId }.take(3)
+                topBucket.addAll(relatedSongs)
+            }
         }
 
         grouped.mapNotNull { (title, list) ->

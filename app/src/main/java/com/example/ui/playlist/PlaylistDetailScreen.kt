@@ -79,10 +79,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
@@ -372,12 +376,13 @@ fun PlaylistDetailScreen(
                 .testTag("playlist_tracks_list"),
             contentPadding = PaddingValues(bottom = 190.dp)
         ) {
-            // HERO HEADER: Full-bleed cover image at top with seamless blur & opacity fade (Screenshot_20261020_165435)
-            item(key = "playlist_hero_header") {
+            // HERO HEADER: Full-bleed cover image at top with seamless alpha mask & color fade
+            item(key = "playlist_hero_header", contentType = "hero_header") {
                 PlaylistHeroHeader(
                     playlist = playlist,
                     coverUrl = coverUrl,
                     username = username,
+                    dominantAccent = animatedDominant,
                     pageBaseTint = pageBaseTint,
                     subtitleCoralTint = subtitleCoralTint,
                     actionCircleColor = actionCircleColor,
@@ -413,7 +418,8 @@ fun PlaylistDetailScreen(
 
             itemsIndexed(
                 items = displayedTracks,
-                key = { idx, item -> "pl_track_${item.id}_$idx" }
+                key = { idx, item -> "pl_track_${item.id}_$idx" },
+                contentType = { _, _ -> "playlist_track_row" }
             ) { index, track ->
                 val isCurrentlyPlaying = currentPlayingTrackId != null &&
                     (track.id == currentPlayingTrackId || (track.videoId != null && track.videoId == currentPlayingTrackId))
@@ -460,6 +466,7 @@ private fun PlaylistHeroHeader(
     playlist: PlaylistDetail,
     coverUrl: String,
     username: String,
+    dominantAccent: Color,
     pageBaseTint: Color,
     subtitleCoralTint: Color,
     actionCircleColor: Color,
@@ -477,7 +484,6 @@ private fun PlaylistHeroHeader(
     val context = LocalContext.current
     val trackCount = playlist.tracks.size.takeIf { it > 0 } ?: playlist.totalTracks
 
-    // Format subtitle like Screenshot_20261020_165435: "user, 22 lagu"
     val authorLine = remember(playlist.authorSubtitle, playlist.subtitle, username, trackCount) {
         val raw = playlist.authorSubtitle.ifBlank { playlist.subtitle }
         if (raw.contains("lagu", ignoreCase = true) && !raw.contains("•")) {
@@ -496,43 +502,47 @@ private fun PlaylistHeroHeader(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // Full-width top cover image with seamless blur & opacity fade (no hard border line!)
+        // Full-width top cover image with seamless offscreen alpha feathering & adaptive color blend
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(386.dp)
+                .height(404.dp)
+                .background(pageBaseTint)
         ) {
             if (coverUrl.isNotBlank()) {
-                // 1. Blurred ambient backdrop so edges & bottom transition seamlessly
-                AsyncImage(
-                    model = remember(coverUrl) {
-                        ImageRequest.Builder(context)
-                            .data(coverUrl)
-                            .size(Size(400, 400))
-                            .crossfade(false)
-                            .build()
-                    },
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .blur(32.dp)
-                )
+                val heroRequest = remember(context, coverUrl) {
+                    ImageRequest.Builder(context)
+                        .data(coverUrl)
+                        .size(Size(640, 640))
+                        .allowHardware(true)
+                        .crossfade(false)
+                        .build()
+                }
 
-                // 2. Full-width main cover artwork at the top
+                // Single full-bleed artwork with smooth vertical + edge alpha mask (zero hard border!)
                 AsyncImage(
-                    model = remember(coverUrl) {
-                        ImageRequest.Builder(context)
-                            .data(coverUrl)
-                            .size(Size(800, 800))
-                            .crossfade(false)
-                            .build()
-                    },
+                    model = heroRequest,
                     contentDescription = playlist.title,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .height(350.dp)
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            compositingStrategy = CompositingStrategy.Offscreen
+                        }
+                        .drawWithContent {
+                            drawContent()
+                            drawRect(
+                                brush = Brush.verticalGradient(
+                                    0.0f to Color.Black,
+                                    0.42f to Color.Black,
+                                    0.64f to Color.Black.copy(alpha = 0.72f),
+                                    0.80f to Color.Black.copy(alpha = 0.32f),
+                                    0.92f to Color.Black.copy(alpha = 0.08f),
+                                    1.0f to Color.Transparent
+                                ),
+                                blendMode = BlendMode.DstIn
+                            )
+                        }
                 )
             } else {
                 Box(
@@ -540,23 +550,23 @@ private fun PlaylistHeroHeader(
                         .fillMaxSize()
                         .background(
                             Brush.linearGradient(
-                                colors = listOf(pageBaseTint.lightenTowardWhite(0.2f), pageBaseTint)
+                                colors = listOf(dominantAccent.copy(alpha = 0.65f), pageBaseTint)
                             )
                         )
                 )
             }
 
-            // 3. Soft blurred bottom feather strip so there is zero visible seam line
+            // Soft atmospheric color wash matching the extracted cover color
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(
                         Brush.verticalGradient(
-                            0.0f to Color.Black.copy(alpha = 0.18f),
-                            0.35f to Color.Transparent,
-                            0.58f to pageBaseTint.copy(alpha = 0.38f),
-                            0.76f to pageBaseTint.copy(alpha = 0.78f),
-                            0.90f to pageBaseTint.copy(alpha = 0.95f),
+                            0.0f to Color.Black.copy(alpha = 0.22f),
+                            0.28f to Color.Transparent,
+                            0.52f to dominantAccent.darken(0.38f).copy(alpha = 0.36f),
+                            0.74f to pageBaseTint.copy(alpha = 0.78f),
+                            0.90f to pageBaseTint.copy(alpha = 0.96f),
                             1.0f to pageBaseTint
                         )
                     )
@@ -905,8 +915,8 @@ private fun PlaylistTrackRowItem(
         else fallbackCoverUrl
     }
     val primaryUrl = remember(track.thumbnailUrl, cleanVid, fallbackCoverUrl) {
-        track.highResThumbnail.ifBlank {
-            if (cleanVid != null) "https://i.ytimg.com/vi/$cleanVid/hqdefault.jpg"
+        track.smallThumbnail.ifBlank {
+            if (cleanVid != null) "https://i.ytimg.com/vi/$cleanVid/mqdefault.jpg"
             else fallbackCoverUrl
         }
     }
@@ -936,7 +946,8 @@ private fun PlaylistTrackRowItem(
                 model = remember(activeThumbUrl) {
                     ImageRequest.Builder(context)
                         .data(activeThumbUrl)
-                        .size(Size(160, 160))
+                        .size(Size(144, 144))
+                        .allowHardware(true)
                         .crossfade(false)
                         .build()
                 },

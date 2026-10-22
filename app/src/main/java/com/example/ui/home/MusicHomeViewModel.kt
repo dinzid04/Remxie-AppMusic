@@ -892,6 +892,7 @@ class MusicHomeViewModel(application: Application) : AndroidViewModel(applicatio
             if (current.isVisible && current.playlist?.id == LOCAL_MUSIC_PLAYLIST_ID) {
                 _playlistScreenState.update {
                     it.copy(
+                        isLoading = false,
                         playlist = it.playlist?.copy(
                             subtitle = "${_username.value}, ${scanned.size} lagu",
                             authorSubtitle = "${_username.value}, ${scanned.size} lagu",
@@ -933,32 +934,26 @@ class MusicHomeViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun openLocalMusicPlaylist() {
-        viewModelScope.launch {
-            val granted = downloadManager.hasAudioStoragePermission()
-            _hasAudioPermission.value = granted
-            val scanned = if (granted) {
-                downloadManager.scanLocalDeviceMusic()
-            } else {
-                emptyList()
-            }
-            _localDeviceTracks.value = scanned
-            _playlistScreenState.value = PlaylistScreenState(
-                isVisible = true,
-                isLoading = false,
-                playlist = PlaylistDetail(
-                    id = LOCAL_MUSIC_PLAYLIST_ID,
-                    title = "Local Music",
-                    subtitle = "${_username.value}, ${scanned.size} lagu",
-                    authorSubtitle = "${_username.value}, ${scanned.size} lagu",
-                    metaSubtitle = "LOCAL STORAGE • ${scanned.size} TRACKS",
-                    description = "Semua file audio yang dipindai otomatis dari penyimpanan HP Anda.",
-                    thumbnailUrl = scanned.firstOrNull()?.thumbnailUrl ?: "",
-                    isAlbum = false,
-                    totalTracks = scanned.size,
-                    tracks = scanned
-                )
+        val cachedTracks = _localDeviceTracks.value
+        // Open the Local Music screen immediately (0ms delay) with cached tracks
+        _playlistScreenState.value = PlaylistScreenState(
+            isVisible = true,
+            isLoading = cachedTracks.isEmpty(),
+            playlist = PlaylistDetail(
+                id = LOCAL_MUSIC_PLAYLIST_ID,
+                title = "Local Music",
+                subtitle = "${_username.value}, ${cachedTracks.size} lagu",
+                authorSubtitle = "${_username.value}, ${cachedTracks.size} lagu",
+                metaSubtitle = "LOCAL STORAGE • ${cachedTracks.size} TRACKS",
+                description = "Semua file audio yang dipindai otomatis dari penyimpanan HP Anda.",
+                thumbnailUrl = cachedTracks.firstOrNull()?.thumbnailUrl ?: "",
+                isAlbum = false,
+                totalTracks = cachedTracks.size,
+                tracks = cachedTracks
             )
-        }
+        )
+        // Refresh/scan asynchronously in background without blocking navigation
+        refreshLocalDeviceMusic()
     }
 
     fun openLibraryPlaylist(userPlaylist: UserLibraryPlaylist) {

@@ -76,8 +76,8 @@ data class MusicItem(
         get() = upgradeThumbnailUrl(thumbnailUrl, videoId, Quality.ULTRA)
 
     enum class Quality(val googleSize: Int, val ytFile: String) {
-        SMALL(360, "hqdefault.jpg"),
-        HIGH(720, "hqdefault.jpg"),
+        SMALL(226, "mqdefault.jpg"),
+        HIGH(420, "hqdefault.jpg"),
         ULTRA(1080, "maxresdefault.jpg")
     }
 
