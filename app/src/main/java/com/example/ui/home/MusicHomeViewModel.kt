@@ -6,6 +6,14 @@ import androidx.compose.runtime.Immutable
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.local.AppDatabase
+import com.example.data.lyrics.EmbeddedLyrics
+import com.example.data.lyrics.LyricLine as BitChordLyricLine
+import com.example.data.lyrics.LyricsProviderState
+import com.example.data.lyrics.LyricsRepository
+import com.example.data.lyrics.LyricsSettingsState
+import com.example.data.lyrics.LyricsSettingsStore
+import com.example.data.lyrics.LyricsSource
+import com.example.data.lyrics.LyricsTranslation
 import com.example.data.model.ActiveDownloadProgress
 import com.example.data.model.ArtistProfileDetail
 import com.example.data.model.ConnectedAccountState
@@ -114,6 +122,7 @@ class MusicHomeViewModel(application: Application) : AndroidViewModel(applicatio
     private val repository = MusicRepository(database.recentTrackDao())
     private val playerController = AudioPlayerController.getInstance(application)
     private val downloadManager = MusicDownloadManager.getInstance(application)
+    private val lyricsSettingsStore = LyricsSettingsStore.getInstance(application)
     private val prefs = application.getSharedPreferences("bitchord_experimental_prefs", Context.MODE_PRIVATE)
 
     private val installDateFormatted: String by lazy {
@@ -287,6 +296,45 @@ class MusicHomeViewModel(application: Application) : AndroidViewModel(applicatio
 
     private val _selectedLyricsProvider = MutableStateFlow(LyricsProvider.LRC_RED)
     val selectedLyricsProvider: StateFlow<LyricsProvider> = _selectedLyricsProvider.asStateFlow()
+
+    // BitChord Lyrics Engine & Multi-Provider State
+    val lyricsSettings: StateFlow<LyricsSettingsState> = lyricsSettingsStore.state
+
+    private val _bitChordLyricsLines = MutableStateFlow<List<BitChordLyricLine>>(emptyList())
+    val bitChordLyricsLines: StateFlow<List<BitChordLyricLine>> = _bitChordLyricsLines.asStateFlow()
+
+    private val _activeLyricsSource = MutableStateFlow<LyricsSource?>(null)
+    val activeLyricsSource: StateFlow<LyricsSource?> = _activeLyricsSource.asStateFlow()
+
+    private val _isEmbeddedLyrics = MutableStateFlow(false)
+    val isEmbeddedLyrics: StateFlow<Boolean> = _isEmbeddedLyrics.asStateFlow()
+
+    private val _isLoadingLyrics = MutableStateFlow(false)
+    val isLoadingLyrics: StateFlow<Boolean> = _isLoadingLyrics.asStateFlow()
+
+    private val _lyricsProviderStates = MutableStateFlow<Map<LyricsSource, LyricsProviderState>>(emptyMap())
+    val lyricsProviderStates: StateFlow<Map<LyricsSource, LyricsProviderState>> = _lyricsProviderStates.asStateFlow()
+
+    private val _lyricsProviderResults = MutableStateFlow<Map<LyricsSource, List<BitChordLyricLine>>>(emptyMap())
+    val lyricsProviderResults: StateFlow<Map<LyricsSource, List<BitChordLyricLine>>> = _lyricsProviderResults.asStateFlow()
+
+    private val _translatedLyrics = MutableStateFlow<List<BitChordLyricLine>?>(null)
+    val translatedLyrics: StateFlow<List<BitChordLyricLine>?> = _translatedLyrics.asStateFlow()
+
+    private val _romanizedLyrics = MutableStateFlow<List<BitChordLyricLine>?>(null)
+    val romanizedLyrics: StateFlow<List<BitChordLyricLine>?> = _romanizedLyrics.asStateFlow()
+
+    private val _isTranslationEnabled = MutableStateFlow(false)
+    val isTranslationEnabled: StateFlow<Boolean> = _isTranslationEnabled.asStateFlow()
+
+    private val _isRomanizationEnabled = MutableStateFlow(false)
+    val isRomanizationEnabled: StateFlow<Boolean> = _isRomanizationEnabled.asStateFlow()
+
+    private val _isTranslatingLyrics = MutableStateFlow(false)
+    val isTranslatingLyrics: StateFlow<Boolean> = _isTranslatingLyrics.asStateFlow()
+
+    private var lyricsFetchJob: Job? = null
+    private var translationJob: Job? = null
 
     private val _customCoverOverrides = MutableStateFlow<Map<String, String>>(emptyMap())
     val customCoverOverrides: StateFlow<Map<String, String>> = _customCoverOverrides.asStateFlow()
@@ -1643,10 +1691,348 @@ class MusicHomeViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun selectLyricsProvider(provider: LyricsProvider) {
         _selectedLyricsProvider.value = provider
+        val targetSource = if (provider == LyricsProvider.YOUTUBE_MUSIC) {
+            LyricsSource.YOUTUBE_MUSIC
+        } else {
+            LyricsSource.LRC_RED
+        }
+        selectBitChordLyricsSource(targetSource)
+    }
+
+    fun selectBitChordLyricsSource(source: LyricsSource) {
         val activeTrack = playerController.playerState.value.currentTrack ?: return
-        viewModelScope.launch {
-            val updatedLyrics = repository.getTrackLyrics(activeTrack, preferredProvider = provider)
-            _currentLyrics.value = updatedLyrics
+        _activeLyricsSource.value = source
+        _isEmbeddedLyrics.value = false
+        _selectedLyricsProvider.value = if (source == LyricsSource.YOUTUBE_MUSIC || source == LyricsSource.YOUTUBE_TRANSCRIPT) {
+            LyricsProvider.YOUTUBE_MUSIC
+        } else {
+            LyricsProvider.LRC_RED
+        }
+
+        // Check if already fetched in memory for this track
+        val existingLines = _lyricsProviderResults.value[source]
+        if (!existingLines.isNullOrEmpty()) {
+            applyResolvedBitChordLyrics(
+                track = activeTrack,
+                lines = existingLines,
+                winningSource = source,
+                isEmbedded = false
+            )
+            _uiMessage.value = "Sumber lirik: ${source.displayName}"
+            return
+        }
+
+        // Fetch on-demand from the selected provider
+        lyricsFetchJob?.cancel()
+        lyricsFetchJob = viewModelScope.launch {
+            _isLoadingLyrics.value = true
+            _lyricsProviderStates.update { it + (source to LyricsProviderState.FETCHING) }
+            val settings = lyricsSettingsStore.state.value
+            val durationSec = parseTrackDurationSeconds(activeTrack.duration, playerController.playerState.value.durationSec)
+            val fetched = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                LyricsRepository.fetchSingleSource(
+                    source = source,
+                    videoId = activeTrack.videoId ?: activeTrack.id,
+                    title = activeTrack.title,
+                    artist = activeTrack.cleanArtist,
+                    album = null,
+                    durationMs = durationSec * 1000L,
+                    paxSenixApiKey = settings.paxSenixApiKey
+                )
+            }
+            _isLoadingLyrics.value = false
+            if (!fetched.isNullOrEmpty()) {
+                _lyricsProviderStates.update { it + (source to LyricsProviderState.FOUND) }
+                _lyricsProviderResults.update { it + (source to fetched) }
+                applyResolvedBitChordLyrics(
+                    track = activeTrack,
+                    lines = fetched,
+                    winningSource = source,
+                    isEmbedded = false
+                )
+                _uiMessage.value = "Lirik dimuat dari ${source.displayName}"
+            } else {
+                _lyricsProviderStates.update { it + (source to LyricsProviderState.NOT_FOUND) }
+                _uiMessage.value = "${source.displayName} tidak memiliki lirik untuk lagu ini"
+            }
+        }
+    }
+
+    fun toggleLyricsSourceEnabled(source: LyricsSource) {
+        lyricsSettingsStore.toggleSourceEnabled(source)
+        val activeTrack = playerController.playerState.value.currentTrack
+        if (activeTrack != null) {
+            fetchBitChordLyricsForTrack(activeTrack)
+        }
+    }
+
+    fun moveLyricsSourceOrder(fromIndex: Int, toIndex: Int) {
+        val currentOrder = lyricsSettingsStore.state.value.sourceOrder.toMutableList()
+        if (fromIndex !in currentOrder.indices || toIndex !in currentOrder.indices) return
+        val moved = currentOrder.removeAt(fromIndex)
+        currentOrder.add(toIndex, moved)
+        lyricsSettingsStore.setSourceOrder(currentOrder)
+        val activeTrack = playerController.playerState.value.currentTrack
+        if (activeTrack != null) {
+            fetchBitChordLyricsForTrack(activeTrack)
+        }
+    }
+
+    fun setPrioritizeSyllableSync(enabled: Boolean) {
+        lyricsSettingsStore.setPrioritizeSyllableSync(enabled)
+        val activeTrack = playerController.playerState.value.currentTrack
+        if (activeTrack != null) {
+            fetchBitChordLyricsForTrack(activeTrack)
+        }
+    }
+
+    fun savePaxSenixApiKey(key: String) {
+        lyricsSettingsStore.setPaxSenixApiKey(key)
+        _uiMessage.value = if (key.isBlank()) "PaxSenix API Key dihapus" else "PaxSenix API Key disimpan"
+        val activeTrack = playerController.playerState.value.currentTrack
+        if (activeTrack != null) {
+            fetchBitChordLyricsForTrack(activeTrack)
+        }
+    }
+
+    fun resetLyricsSourcesToDefault() {
+        lyricsSettingsStore.resetSourcesToDefault()
+        _uiMessage.value = "Urutan sumber lirik dikembalikan ke default"
+        val activeTrack = playerController.playerState.value.currentTrack
+        if (activeTrack != null) {
+            fetchBitChordLyricsForTrack(activeTrack)
+        }
+    }
+
+    fun setCurrentTrackLyricsOffsetMs(offsetMs: Int) {
+        val trackId = playerController.playerState.value.currentTrack?.id
+        lyricsSettingsStore.setTrackOffsetMs(trackId, offsetMs)
+    }
+
+    fun setSyncedLyricsEnabled(enabled: Boolean) {
+        lyricsSettingsStore.setSyncedLyrics(enabled)
+    }
+
+    fun setLyricsBlurEnabled(enabled: Boolean) {
+        lyricsSettingsStore.setLyricsBlur(enabled)
+    }
+
+    fun setReduceLyricsAnimation(enabled: Boolean) {
+        lyricsSettingsStore.setReduceAnimation(enabled)
+    }
+
+    fun toggleLyricsTranslation() {
+        val next = !_isTranslationEnabled.value
+        _isTranslationEnabled.value = next
+        if (next) {
+            refreshTranslationAndRomanization()
+        }
+    }
+
+    fun toggleLyricsRomanization() {
+        val next = !_isRomanizationEnabled.value
+        _isRomanizationEnabled.value = next
+        if (next) {
+            refreshTranslationAndRomanization()
+        }
+    }
+
+    fun setLyricsTranslationLanguage(langCode: String) {
+        lyricsSettingsStore.setTranslationLanguage(langCode)
+        _translatedLyrics.value = null
+        if (!_isTranslationEnabled.value) {
+            _isTranslationEnabled.value = true
+        }
+        refreshTranslationAndRomanization()
+    }
+
+    private fun refreshTranslationAndRomanization() {
+        val lines = _bitChordLyricsLines.value
+        if (lines.isEmpty()) return
+        val wantTrans = _isTranslationEnabled.value
+        val wantRom = _isRomanizationEnabled.value
+        if (!wantTrans && !wantRom) return
+
+        translationJob?.cancel()
+        translationJob = viewModelScope.launch {
+            _isTranslatingLyrics.value = true
+            val lang = lyricsSettingsStore.state.value.translationLanguage
+            if (wantTrans && _translatedLyrics.value == null) {
+                val trans = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    LyricsTranslation.translate(lines, lang)
+                }
+                _translatedLyrics.value = trans
+            }
+            if (wantRom && _romanizedLyrics.value == null) {
+                val rom = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    LyricsTranslation.romanize(lines)
+                }
+                _romanizedLyrics.value = rom
+            }
+            _isTranslatingLyrics.value = false
+        }
+    }
+
+    private fun parseTrackDurationSeconds(durationStr: String?, fallbackSec: Int): Int {
+        if (!durationStr.isNullOrBlank()) {
+            val parts = durationStr.trim().split(":").mapNotNull { it.trim().toIntOrNull() }
+            when (parts.size) {
+                2 -> return (parts[0] * 60 + parts[1]).coerceAtLeast(1)
+                3 -> return (parts[0] * 3600 + parts[1] * 60 + parts[2]).coerceAtLeast(1)
+            }
+        }
+        return fallbackSec.takeIf { it > 0 } ?: 210
+    }
+
+    private fun applyResolvedBitChordLyrics(
+        track: MusicItem,
+        lines: List<BitChordLyricLine>,
+        winningSource: LyricsSource?,
+        isEmbedded: Boolean,
+        fallbackData: LyricsData? = _currentLyrics.value
+    ) {
+        _bitChordLyricsLines.value = lines
+        _activeLyricsSource.value = winningSource
+        _isEmbeddedLyrics.value = isEmbedded
+        _translatedLyrics.value = null
+        _romanizedLyrics.value = null
+
+        _currentLyrics.value = LyricsData.fromBitChord(
+            videoId = track.videoId ?: track.id,
+            bitChordLines = lines,
+            winningSource = winningSource,
+            isEmbedded = isEmbedded,
+            fallbackLyricsData = fallbackData
+        )
+
+        if (_isTranslationEnabled.value || _isRomanizationEnabled.value) {
+            refreshTranslationAndRomanization()
+        }
+    }
+
+    private fun fetchBitChordLyricsForTrack(item: MusicItem) {
+        lyricsFetchJob?.cancel()
+        lyricsFetchJob = viewModelScope.launch {
+            _isLoadingLyrics.value = true
+            _lyricsProviderStates.value = emptyMap()
+            _lyricsProviderResults.value = emptyMap()
+            _bitChordLyricsLines.value = emptyList()
+            _activeLyricsSource.value = null
+            _isEmbeddedLyrics.value = false
+            _translatedLyrics.value = null
+            _romanizedLyrics.value = null
+
+            val settings = lyricsSettingsStore.state.value
+            val durationSec = parseTrackDurationSeconds(item.duration, playerController.playerState.value.durationSec)
+            val offlineLrcFile = downloadManager.getOfflineLyricsFile(item.videoId ?: item.id)
+                ?: downloadManager.getOfflineLyricsFile(item.id)
+            val offlineAudioFile = downloadManager.getOfflineFileIfExists(item.videoId ?: item.id)
+                ?: downloadManager.getOfflineFileIfExists(item.id)
+            val localPath = item.localFilePath?.removePrefix("file://")
+                ?: offlineAudioFile?.absolutePath
+                ?: offlineLrcFile?.absolutePath
+
+            // 1. Check offline sidecar .lrc in offline_lyrics first if present
+            if (offlineLrcFile != null && offlineLrcFile.exists()) {
+                val sidecarLines = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    try {
+                        com.example.data.lyrics.ProviderLyrics.parse(offlineLrcFile.readText())
+                    } catch (_: Exception) {
+                        null
+                    }
+                }
+                if (!sidecarLines.isNullOrEmpty()) {
+                    _isLoadingLyrics.value = false
+                    applyResolvedBitChordLyrics(
+                        track = item,
+                        lines = sidecarLines,
+                        winningSource = null,
+                        isEmbedded = true
+                    )
+                    return@launch
+                }
+            }
+
+            // 2. Also fetch legacy LyricsData in parallel for HD cover metadata (hdCoverUrl / accentColorHex)
+            val legacyDeferred = async(kotlinx.coroutines.Dispatchers.IO) {
+                try {
+                    repository.getTrackLyrics(item, preferredProvider = _selectedLyricsProvider.value)
+                } catch (_: Exception) {
+                    null
+                }
+            }
+
+            val (winningSrc, lines) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                LyricsRepository.getLyrics(
+                    context = getApplication(),
+                    videoId = item.videoId ?: item.id,
+                    title = item.title,
+                    artist = item.cleanArtist,
+                    album = null,
+                    durationMs = durationSec * 1000L,
+                    localFilePathOrUri = localPath,
+                    enabledSources = settings.enabledSources,
+                    sourceOrder = settings.sourceOrder,
+                    prioritizeSyllableSync = settings.prioritizeSyllableSync,
+                    paxSenixApiKey = settings.paxSenixApiKey,
+                    onSourceStarted = { src ->
+                        _lyricsProviderStates.update { it + (src to LyricsProviderState.FETCHING) }
+                    },
+                    onSourceResult = { src, resLines ->
+                        if (!resLines.isNullOrEmpty()) {
+                            _lyricsProviderStates.update { it + (src to LyricsProviderState.FOUND) }
+                            _lyricsProviderResults.update { it + (src to resLines) }
+                        } else {
+                            _lyricsProviderStates.update { it + (src to LyricsProviderState.NOT_FOUND) }
+                        }
+                    },
+                    onSourceCancelled = { src ->
+                        _lyricsProviderStates.update { it + (src to LyricsProviderState.NOT_FETCHED) }
+                    }
+                )
+            }
+
+            val embeddedFlag = winningSrc == null && lines.isNotEmpty()
+            val legacyData = legacyDeferred.await()
+            _isLoadingLyrics.value = false
+
+            if (lines.isNotEmpty()) {
+                applyResolvedBitChordLyrics(
+                    track = item,
+                    lines = lines,
+                    winningSource = winningSrc,
+                    isEmbedded = embeddedFlag,
+                    fallbackData = legacyData
+                )
+            } else if (legacyData != null) {
+                // Convert fallback lines into BitChordLyricLine so UI always renders cleanly
+                val converted = if (legacyData.syncedLines.isNotEmpty()) {
+                    legacyData.syncedLines.map { l ->
+                        BitChordLyricLine(
+                            timeMs = ((l.beginSec ?: 0.0) * 1000.0).toLong(),
+                            text = l.text,
+                            words = l.words.map { w ->
+                                com.example.data.lyrics.LyricWord(
+                                    startMs = (w.beginSec * 1000.0).toLong(),
+                                    endMs = (w.endSec * 1000.0).toLong(),
+                                    text = w.text
+                                )
+                            }
+                        )
+                    }
+                } else {
+                    legacyData.lines.map { text ->
+                        BitChordLyricLine(timeMs = 0L, text = text)
+                    }
+                }
+                applyResolvedBitChordLyrics(
+                    track = item,
+                    lines = converted,
+                    winningSource = LyricsSource.LRC_RED,
+                    isEmbedded = false,
+                    fallbackData = legacyData
+                )
+            }
         }
     }
 
@@ -1816,11 +2202,13 @@ class MusicHomeViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     private fun enrichTrackPlaybackContext(item: MusicItem) {
-        val preferred = _selectedLyricsProvider.value
         _currentLyrics.value = null
         // Default to cover image first when a track/video starts; user can switch to video mode via 3-dots menu
         _isVideoModeActive.value = false
         _activeVideoStreamUrl.value = null
+
+        // Launch full BitChord Multi-Provider Lyrics Engine race + Embedded Lyrics reader
+        fetchBitChordLyricsForTrack(item)
 
         trackEnrichmentJob?.cancel()
         trackEnrichmentJob = viewModelScope.launch {
@@ -1829,13 +2217,7 @@ class MusicHomeViewModel(application: Application) : AndroidViewModel(applicatio
                 resolveArtistAvatarIfNeeded(item.cleanArtist, item.browseId)
             }
 
-            val lyricsDeferred = async { repository.getTrackLyrics(item, preferredProvider = preferred) }
-            val queueDeferred = async { repository.getTrackQueue(item) }
-
-            val fetchedLyrics = lyricsDeferred.await()
-            _currentLyrics.value = fetchedLyrics
-
-            val fetchedQueue = queueDeferred.await()
+            val fetchedQueue = repository.getTrackQueue(item)
             if (fetchedQueue.isNotEmpty()) {
                 playerController.setAutoPlayQueue(fetchedQueue)
             }

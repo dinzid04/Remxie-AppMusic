@@ -1,6 +1,6 @@
 {
-  "summary":  "Rencana implementasi perbaikan tampilan Playlist/Album header blur-opacity, halaman Home (Hits Indonesia, Rilis Baru, Pintasan Cepat 1:1), optimasi performa scrolling 60-120fps, akses instan Local Music tanpa delay, dan kartu Top Result (Hasil Teratas) di halaman Search.",
-  "updatedAt":  "2026-10-22T14:33:59.150503260Z",
+  "summary":  "Rencana implementasi lengkap sistem lirik BitChord (Tahap 1, Tahap 2, dan Tahap 3 sekaligus): Model data & parser lirik (LRC, Enhanced A2 LRC, Karaoke QRC/YRC, TTML, vokal latar, duet alignment, instrumental gaps), seluruh 15+ provider lirik eksternal + EmbeddedLyrics offline, LyricsRepository dengan balapan paralel & ISRC matching, sistem translasi & romanisasi, LyricClock 60fps, serta integrasi UI Player & Pengaturan.",
+  "updatedAt":  "2026-10-22T22:10:31.711966664Z",
   "requestFeedback":  true,
   "userFacing":  true
 }

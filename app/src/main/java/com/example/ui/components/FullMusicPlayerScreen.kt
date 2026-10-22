@@ -85,8 +85,11 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PersonOutline
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.Restore
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Shuffle
+import androidx.compose.material.icons.filled.Subtitles
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -163,6 +166,10 @@ import coil.imageLoader
 import coil.request.CachePolicy
 import coil.request.ImageRequest
 import coil.request.SuccessResult
+import com.example.data.lyrics.LyricLine as BitChordLyricLine
+import com.example.data.lyrics.LyricsProviderState
+import com.example.data.lyrics.LyricsSettingsState
+import com.example.data.lyrics.LyricsSource
 import com.example.data.model.ActiveDownloadProgress
 import com.example.data.model.LyricLine
 import com.example.data.model.LyricsData
@@ -241,15 +248,47 @@ fun FullMusicPlayerScreen(
     onSetSleepTimerEndOfTrack: () -> Unit = {},
     onCancelSleepTimer: () -> Unit = {},
     onOpenArtistProfile: (String, String) -> Unit = { _, _ -> },
+    bitChordLyricsLines: List<BitChordLyricLine> = emptyList(),
+    translatedLyricsLines: List<BitChordLyricLine>? = null,
+    romanizedLyricsLines: List<BitChordLyricLine>? = null,
+    isTranslationEnabled: Boolean = false,
+    isRomanizationEnabled: Boolean = false,
+    isTranslatingLyrics: Boolean = false,
+    activeLyricsSource: LyricsSource? = null,
+    isEmbeddedLyrics: Boolean = false,
+    isLoadingLyrics: Boolean = false,
+    lyricsSettings: LyricsSettingsState = LyricsSettingsState(),
+    lyricsProviderStates: Map<LyricsSource, LyricsProviderState> = emptyMap(),
+    lyricsProviderResults: Map<LyricsSource, List<BitChordLyricLine>> = emptyMap(),
+    onSelectBitChordLyricsSource: (LyricsSource) -> Unit = {},
+    onToggleLyricsSourceEnabled: (LyricsSource) -> Unit = {},
+    onMoveLyricsSourceOrder: (Int, Int) -> Unit = { _, _ -> },
+    onTogglePrioritizeSyllable: (Boolean) -> Unit = {},
+    onSavePaxSenixApiKey: (String) -> Unit = {},
+    onResetLyricsSourcesDefault: () -> Unit = {},
+    onChangeTrackLyricsOffsetMs: (Int) -> Unit = {},
+    onToggleLyricsTranslation: () -> Unit = {},
+    onToggleLyricsRomanization: () -> Unit = {},
+    onSelectTranslationLanguage: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val track = playerState.currentTrack
     if (!isVisible || track == null) return
 
     var showLyricsProviderSheet by remember { mutableStateOf(false) }
+    var showLyricsSourcesDialog by remember { mutableStateOf(false) }
+    var showLyricsOffsetSheet by remember { mutableStateOf(false) }
     var showPlayerMoreOptionsSheet by remember { mutableStateOf(false) }
     var showSleepTimerOverlay by remember { mutableStateOf(false) }
     var showAddToPlaylistSheet by remember { mutableStateOf(false) }
+
+    val currentTrackOffsetMs = remember(track.id, lyricsSettings.trackOffsetsMs, lyricsSettings.globalOffsetMs) {
+        lyricsSettings.offsetForTrack(track.id)
+    }
+    val bitChordClockMsState = rememberBitChordLyricClockMs(
+        playerState = playerState,
+        offsetMs = currentTrackOffsetMs
+    )
 
     BackHandler {
         when {
@@ -773,12 +812,29 @@ fun FullMusicPlayerScreen(
                     LyricsSubViewContent(
                         playerState = playerState,
                         smoothPositionSecState = smoothPositionSecState,
+                        bitChordClockMsState = bitChordClockMsState,
                         lyricsData = lyricsData,
+                        bitChordLyricsLines = bitChordLyricsLines,
+                        translatedLyricsLines = translatedLyricsLines,
+                        romanizedLyricsLines = romanizedLyricsLines,
+                        isTranslationEnabled = isTranslationEnabled,
+                        isRomanizationEnabled = isRomanizationEnabled,
+                        isTranslatingLyrics = isTranslatingLyrics,
+                        activeLyricsSource = activeLyricsSource,
+                        isEmbeddedLyrics = isEmbeddedLyrics,
+                        isLoadingLyrics = isLoadingLyrics,
+                        lyricsSettings = lyricsSettings,
+                        currentTrackOffsetMs = currentTrackOffsetMs,
                         selectedLyricsProvider = selectedLyricsProvider,
                         frostedTint = frostedTint,
                         frostedBorderTint = frostedBorderTint,
                         topContentPadding = compactHeaderBottomDp,
                         onOpenProviderSelector = { showLyricsProviderSheet = true },
+                        onOpenSourcesDialog = { showLyricsSourcesDialog = true },
+                        onOpenOffsetSheet = { showLyricsOffsetSheet = true },
+                        onToggleTranslation = onToggleLyricsTranslation,
+                        onToggleRomanization = onToggleLyricsRomanization,
+                        onSelectTranslationLanguage = onSelectTranslationLanguage,
                         onChangeSubView = onChangeSubView,
                         onTogglePlayPause = onTogglePlayPause,
                         onNextTrack = onNextTrack,
@@ -1303,6 +1359,61 @@ fun FullMusicPlayerScreen(
                                 modifier = Modifier.testTag("player_more_sleep_timer_button")
                             )
 
+                            HorizontalDivider(
+                                color = Color.White.copy(alpha = 0.08f),
+                                thickness = 0.8.dp,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+
+                            // 7.1 BitChord Lyrics Provider Selector
+                            PlayerGlassMenuRow(
+                                icon = Icons.Default.Subtitles,
+                                iconTint = Color.White,
+                                label = "Sumber Lirik (Provider)",
+                                trailingBadge = when {
+                                    isEmbeddedLyrics -> "Offline .lrc"
+                                    activeLyricsSource != null -> activeLyricsSource.displayName
+                                    else -> "Auto"
+                                },
+                                onClick = {
+                                    showPlayerMoreOptionsSheet = false
+                                    showLyricsProviderSheet = true
+                                },
+                                modifier = Modifier.testTag("player_more_lyrics_provider_button")
+                            )
+
+                            // 7.2 BitChord Lyrics Priority & Sources Dialog
+                            PlayerGlassMenuRow(
+                                icon = Icons.Default.Tune,
+                                iconTint = Color.White,
+                                label = "Urutan & Prioritas Lirik",
+                                trailingBadge = "${lyricsSettings.enabledSources.size} Aktif",
+                                onClick = {
+                                    showPlayerMoreOptionsSheet = false
+                                    showLyricsSourcesDialog = true
+                                },
+                                modifier = Modifier.testTag("player_more_lyrics_sources_button")
+                            )
+
+                            // 7.3 BitChord Lyrics Offset Sheet
+                            PlayerGlassMenuRow(
+                                icon = Icons.Default.Schedule,
+                                iconTint = Color.White,
+                                label = "Offset Waktu Lirik",
+                                trailingBadge = if (currentTrackOffsetMs == 0) "0.0s" else "%+.1fs".format(currentTrackOffsetMs / 1000f),
+                                onClick = {
+                                    showPlayerMoreOptionsSheet = false
+                                    showLyricsOffsetSheet = true
+                                },
+                                modifier = Modifier.testTag("player_more_lyrics_offset_button")
+                            )
+
+                            HorizontalDivider(
+                                color = Color.White.copy(alpha = 0.08f),
+                                thickness = 0.8.dp,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+
                             // 8. Share
                             PlayerGlassMenuRow(
                                 icon = Icons.Default.Share,
@@ -1336,91 +1447,49 @@ fun FullMusicPlayerScreen(
     }
 
     // =========================================================================
-    // 4. MODAL BOTTOM SHEET: PILIH PENYEDIA LIRIK (Klik "Lirik oleh lrc.red")
+    // 4. BITCHORD LYRICS MODALS: PROVIDER SHEET, SOURCES DIALOG & OFFSET SHEET
     // =========================================================================
     if (showLyricsProviderSheet) {
-        ModalBottomSheet(
-            onDismissRequest = { showLyricsProviderSheet = false },
-            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-            containerColor = SurfaceDark,
-            contentColor = TextPrimaryWhite
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 12.dp)
-            ) {
-                Text(
-                    text = "Pilih Penyedia Lirik",
-                    fontFamily = PlusJakartaSans,
-                    fontWeight = FontWeight.ExtraBold,
-                    fontSize = 19.sp,
-                    color = TextPrimaryWhite
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "Sinkronisasi waktu otomatis mengikuti durasi lagu",
-                    fontFamily = PlusJakartaSans,
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 13.5.sp,
-                    color = TextSecondaryGrey
-                )
-                Spacer(modifier = Modifier.height(14.dp))
-                HorizontalDivider(color = Color(0xFF28282C))
-                Spacer(modifier = Modifier.height(8.dp))
+        LyricsProviderSheet(
+            activeSource = activeLyricsSource,
+            isEmbeddedLyrics = isEmbeddedLyrics,
+            providerStates = lyricsProviderStates,
+            providerResults = lyricsProviderResults,
+            orderedSources = lyricsSettings.sourceOrder,
+            enabledSources = lyricsSettings.enabledSources,
+            onSelectSource = { source ->
+                onSelectBitChordLyricsSource(source)
+            },
+            onOpenSourcesDialog = {
+                showLyricsProviderSheet = false
+                showLyricsSourcesDialog = true
+            },
+            onOpenOffsetSheet = {
+                showLyricsProviderSheet = false
+                showLyricsOffsetSheet = true
+            },
+            onDismiss = { showLyricsProviderSheet = false }
+        )
+    }
 
-                LyricsProvider.entries.forEach { provider ->
-                    val isSelected = selectedLyricsProvider == provider
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(if (isSelected) Color.White.copy(alpha = 0.10f) else Color.Transparent)
-                            .clickable {
-                                onSelectLyricsProvider(provider)
-                                showLyricsProviderSheet = false
-                            }
-                            .padding(horizontal = 14.dp, vertical = 14.dp)
-                            .testTag("lyrics_provider_option_${provider.name.lowercase()}"),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = provider.displayName,
-                                fontFamily = PlusJakartaSans,
-                                fontWeight = FontWeight.ExtraBold,
-                                fontSize = 15.5.sp,
-                                color = Color.White
-                            )
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = if (provider == LyricsProvider.LRC_RED) {
-                                    "Lirik sinkron per baris & kata dari API lrc.red"
-                                } else {
-                                    "Lirik bawaan dari YouTube Music"
-                                },
-                                fontFamily = PlusJakartaSans,
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 12.5.sp,
-                                color = TextSecondaryGrey
-                            )
-                        }
-                        if (isSelected) {
-                            Icon(
-                                imageVector = Icons.Default.CheckCircle,
-                                contentDescription = "Aktif",
-                                tint = ActiveHeartCoral,
-                                modifier = Modifier.size(22.dp)
-                            )
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(6.dp))
-                }
+    if (showLyricsSourcesDialog) {
+        LyricsSourcesDialog(
+            settings = lyricsSettings,
+            onToggleSource = onToggleLyricsSourceEnabled,
+            onMoveSource = onMoveLyricsSourceOrder,
+            onTogglePrioritizeSyllable = onTogglePrioritizeSyllable,
+            onSavePaxSenixApiKey = onSavePaxSenixApiKey,
+            onResetDefault = onResetLyricsSourcesDefault,
+            onDismiss = { showLyricsSourcesDialog = false }
+        )
+    }
 
-                Spacer(modifier = Modifier.height(16.dp))
-            }
-        }
+    if (showLyricsOffsetSheet) {
+        LyricsOffsetSheet(
+            currentOffsetMs = currentTrackOffsetMs,
+            onChangeOffsetMs = onChangeTrackLyricsOffsetMs,
+            onDismiss = { showLyricsOffsetSheet = false }
+        )
     }
 
     // Floating glass 3-dot menu & sleep timer are rendered inline inside the player stage above.
@@ -1577,8 +1646,7 @@ private fun MainPlayerSyncedLyricTeaser(
     durationSec: Int,
     onClick: () -> Unit
 ) {
-    val isSyncedLrc = lyricsData?.provider == LyricsProvider.LRC_RED &&
-        lyricsData.isSynced &&
+    val isSyncedLrc = lyricsData?.isSynced == true &&
         lyricsData.syncedLines.isNotEmpty()
 
     val syncedLines = remember(lyricsData) {
@@ -1837,18 +1905,35 @@ private fun InterludeThreeDotsIndicator(
 }
 
 // ============================================================================
-// LYRICS SUB-VIEW (Syllable-Accurate Karaoke Sweep + Unblurred Default YTM)
+// LYRICS SUB-VIEW (BitChord Multi-Provider Engine + TTML / Word-by-Word Sync)
 // ============================================================================
 @Composable
 private fun LyricsSubViewContent(
     playerState: PlayerUiState,
     smoothPositionSecState: State<Double>,
+    bitChordClockMsState: State<Long>,
     lyricsData: LyricsData?,
+    bitChordLyricsLines: List<BitChordLyricLine>,
+    translatedLyricsLines: List<BitChordLyricLine>?,
+    romanizedLyricsLines: List<BitChordLyricLine>?,
+    isTranslationEnabled: Boolean,
+    isRomanizationEnabled: Boolean,
+    isTranslatingLyrics: Boolean,
+    activeLyricsSource: LyricsSource?,
+    isEmbeddedLyrics: Boolean,
+    isLoadingLyrics: Boolean,
+    lyricsSettings: LyricsSettingsState,
+    currentTrackOffsetMs: Int,
     selectedLyricsProvider: LyricsProvider,
     frostedTint: Color,
     frostedBorderTint: Color,
     topContentPadding: Dp,
     onOpenProviderSelector: () -> Unit,
+    onOpenSourcesDialog: () -> Unit,
+    onOpenOffsetSheet: () -> Unit,
+    onToggleTranslation: () -> Unit,
+    onToggleRomanization: () -> Unit,
+    onSelectTranslationLanguage: (String) -> Unit,
     onChangeSubView: (PlayerSubView) -> Unit,
     onTogglePlayPause: () -> Unit,
     onNextTrack: () -> Unit,
@@ -1860,48 +1945,36 @@ private fun LyricsSubViewContent(
     onToggleRepeat: () -> Unit,
     onToggleAutoPlay: () -> Unit
 ) {
-    // Only apply karaoke synced blur when using lrc.red synced lyrics; Default YTM lyrics are NEVER blurred!
-    val isSyncedLrc = remember(lyricsData, selectedLyricsProvider) {
-        selectedLyricsProvider == LyricsProvider.LRC_RED &&
-            lyricsData?.isSynced == true &&
-            !lyricsData.syncedLines.isNullOrEmpty()
-    }
-
-    val displayLines = remember(lyricsData, isSyncedLrc) {
-        if (isSyncedLrc) {
-            lyricsData?.syncedLines ?: emptyList()
+    val effectiveBitChordLines = remember(bitChordLyricsLines, lyricsData) {
+        if (bitChordLyricsLines.isNotEmpty()) {
+            bitChordLyricsLines
+        } else if (lyricsData != null && lyricsData.bitChordLines.isNotEmpty()) {
+            lyricsData.bitChordLines
+        } else if (lyricsData != null && lyricsData.syncedLines.isNotEmpty()) {
+            lyricsData.syncedLines.map { l ->
+                BitChordLyricLine(
+                    timeMs = ((l.beginSec ?: 0.0) * 1000.0).toLong(),
+                    text = l.text,
+                    words = l.words.map { w ->
+                        com.example.data.lyrics.LyricWord(
+                            startMs = (w.beginSec * 1000.0).toLong(),
+                            endMs = (w.endSec * 1000.0).toLong(),
+                            text = w.text
+                        )
+                    }
+                )
+            }
+        } else if (lyricsData != null && lyricsData.lines.isNotEmpty()) {
+            lyricsData.lines.map { text ->
+                BitChordLyricLine(timeMs = 0L, text = text)
+            }
         } else {
-            lyricsData?.lines?.mapIndexed { _, text ->
-                LyricLine(text = text, beginSec = null, endSec = null)
-            }?.takeIf { it.isNotEmpty() }
-                ?: listOf(LyricLine("Memuat lirik...", 0.0, 10.0))
+            emptyList()
         }
     }
 
-    val durationSec = remember(playerState.durationSec) {
-        playerState.durationSec.toDouble().coerceAtLeast(180.0)
-    }
-
-    val smoothSec = smoothPositionSecState.value
-    // Check active line 25 times per second from the millisecond-accurate smooth clock so there is ZERO lag!
-    val quantizedTick = (smoothSec * 25.0).toInt()
-    val firstLineBegin = displayLines.firstOrNull()?.beginSec ?: 0.0
-    val isInIntro = isSyncedLrc && firstLineBegin > 2.2 && smoothSec < (firstLineBegin - 0.14)
-
-    val activeLineIndex = remember(displayLines, quantizedTick, isSyncedLrc, isInIntro) {
-        if (!isSyncedLrc || isInIntro) {
-            -1
-        } else {
-            val exactIdx = displayLines.indexOfLast { line ->
-                val begin = line.beginSec ?: 0.0
-                smoothSec >= (begin - 0.15)
-            }
-            if (exactIdx >= 0) {
-                exactIdx.coerceIn(0, (displayLines.size - 1).coerceAtLeast(0))
-            } else {
-                0
-            }
-        }
+    val durationMs = remember(playerState.durationSec) {
+        playerState.durationSec.coerceAtLeast(180) * 1000L
     }
 
     val lyricsListState = rememberLazyListState()
@@ -1931,100 +2004,47 @@ private fun LyricsSubViewContent(
         }
     }
 
-    LaunchedEffect(activeLineIndex, isInIntro, isSyncedLrc) {
-        if (isSyncedLrc && !lyricsListState.isScrollInProgress && displayLines.isNotEmpty()) {
-            val targetIdx = if (isInIntro || activeLineIndex <= 0) 0 else (activeLineIndex - 1).coerceAtLeast(0)
-            try {
-                lyricsListState.animateScrollToItem(targetIdx)
-            } catch (_: Exception) {
-            }
-        }
-    }
-
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(top = topContentPadding)
             .windowInsetsPadding(WindowInsets.navigationBars)
     ) {
-        Box(
+        BitChordSyncedLyricsPanel(
+            lines = effectiveBitChordLines,
+            translatedLines = translatedLyricsLines,
+            romanizedLines = romanizedLyricsLines,
+            isTranslationEnabled = isTranslationEnabled,
+            isRomanizationEnabled = isRomanizationEnabled,
+            isTranslating = isTranslatingLyrics,
+            activeSource = activeLyricsSource ?: lyricsData?.winningSource,
+            isEmbeddedLyrics = isEmbeddedLyrics || (lyricsData?.isEmbedded == true),
+            isLoadingLyrics = isLoadingLyrics,
+            lyricsSettings = lyricsSettings,
+            currentTrackOffsetMs = currentTrackOffsetMs,
+            clockMsState = bitChordClockMsState,
+            durationMs = durationMs,
+            listState = lyricsListState,
+            nestedScrollConnection = nestedScrollConnection,
+            frostedTint = frostedTint,
+            frostedBorderTint = frostedBorderTint,
+            onSeekToMs = { targetMs ->
+                val ratio = (targetMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
+                onSeekTo(ratio)
+                controlsVisible = true
+            },
+            onOpenProviderSheet = onOpenProviderSelector,
+            onOpenSourcesDialog = onOpenSourcesDialog,
+            onOpenOffsetSheet = onOpenOffsetSheet,
+            onToggleTranslation = onToggleTranslation,
+            onToggleRomanization = onToggleRomanization,
+            onSelectTranslationLanguage = onSelectTranslationLanguage,
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
-                .nestedScroll(nestedScrollConnection)
-        ) {
-            LazyColumn(
-                state = lyricsListState,
-                contentPadding = PaddingValues(
-                    start = 24.dp,
-                    end = 24.dp,
-                    top = 12.dp,
-                    bottom = 110.dp
-                ),
-                verticalArrangement = Arrangement.spacedBy(22.dp),
-                modifier = Modifier
-                    .fillMaxSize()
-                    .testTag("lyrics_lazy_column")
-            ) {
-                itemsIndexed(
-                    items = displayLines,
-                    key = { idx, line -> "${idx}_${line.text}" },
-                    contentType = { _, _ -> "lyric_line" }
-                ) { index, line ->
-                    val nextLineBegin = displayLines.getOrNull(index + 1)?.beginSec
-                    val lineEnd = line.endSec ?: ((line.beginSec ?: 0.0) + 4.5)
-                    val hasInterludeAfter = isSyncedLrc &&
-                        nextLineBegin != null &&
-                        (nextLineBegin - lineEnd) >= 3.8
-                    val isInPostLineInterlude = hasInterludeAfter &&
-                        index == activeLineIndex &&
-                        smoothSec > (lineEnd + 0.18) &&
-                        smoothSec < ((nextLineBegin ?: durationSec) - 0.15)
+        )
 
-                    val isCurrent = isSyncedLrc && (index == activeLineIndex) && !isInPostLineInterlude && !isInIntro
-                    val isPassed = isSyncedLrc && ((index < activeLineIndex) || isInPostLineInterlude)
-
-                    Column(modifier = Modifier.fillMaxWidth()) {
-                        if (index == 0 && isInIntro) {
-                            InterludeThreeDotsIndicator(
-                                gapStartSec = 0.0,
-                                gapEndSec = firstLineBegin,
-                                smoothSec = smoothSec
-                            )
-                        }
-
-                        KaraokeLyricLineItem(
-                            line = line,
-                            index = index,
-                            isSyncedLrc = isSyncedLrc,
-                            isCurrent = isCurrent,
-                            isPassed = isPassed,
-                            durationSec = durationSec,
-                            smoothPositionSecState = smoothPositionSecState,
-                            onClick = {
-                                if (isSyncedLrc) {
-                                    val targetSec = line.beginSec ?: (index * 5.0)
-                                    val ratio = (targetSec / durationSec).toFloat().coerceIn(0f, 1f)
-                                    onSeekTo(ratio)
-                                }
-                                controlsVisible = true
-                            }
-                        )
-
-                        if (isInPostLineInterlude && nextLineBegin != null) {
-                            Spacer(modifier = Modifier.height(8.dp))
-                            InterludeThreeDotsIndicator(
-                                gapStartSec = lineEnd,
-                                gapEndSec = nextLineBegin,
-                                smoothSec = smoothSec
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        // Auto-Hide Bottom Controls + Clickable Underlined "Lirik oleh lrc.red" above Seek Bar
+        // Auto-Hide Bottom Controls + Clickable Underlined Provider Credit above Seek Bar
         AnimatedVisibility(
             visible = controlsVisible,
             enter = fadeIn(tween(220)) + expandVertically(tween(240)),
@@ -2035,8 +2055,12 @@ private fun LyricsSubViewContent(
                     .fillMaxWidth()
                     .padding(horizontal = 24.dp)
             ) {
-                val creditText = lyricsData?.source?.takeIf { it.isNotBlank() }
-                    ?: selectedLyricsProvider.creditLabel
+                val creditText = when {
+                    isEmbeddedLyrics || lyricsData?.isEmbedded == true -> "Lirik Offline (Embedded .lrc)"
+                    activeLyricsSource != null -> "Lirik oleh ${activeLyricsSource.displayName}"
+                    !lyricsData?.source.isNullOrBlank() -> lyricsData?.source.orEmpty()
+                    else -> selectedLyricsProvider.creditLabel
+                }
 
                 Text(
                     text = creditText,

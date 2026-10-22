@@ -14,6 +14,10 @@ import android.provider.MediaStore
 import androidx.core.content.ContextCompat
 import com.example.data.local.AppDatabase
 import com.example.data.local.DownloadedTrackEntity
+import com.example.data.lyrics.LyricsRepository
+import com.example.data.lyrics.LyricsSettingsStore
+import com.example.data.lyrics.toEnhancedLrc
+import com.example.data.lyrics.toLrc
 import com.example.data.model.ActiveDownloadProgress
 import com.example.data.model.AudioStreamInfo
 import com.example.data.model.MusicItem
@@ -101,6 +105,11 @@ class MusicDownloadManager private constructor(private val context: Context) {
             if (!exists()) mkdirs()
         }
 
+    val lyricsDir: File
+        get() = File(context.filesDir, "offline_lyrics").apply {
+            if (!exists()) mkdirs()
+        }
+
     val externalMusicDir: File
         get() = File(
             Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC),
@@ -149,6 +158,18 @@ class MusicDownloadManager private constructor(private val context: Context) {
         val jpg = File(thumbnailsDir, "$key.jpg")
         if (jpg.exists() && jpg.length() > 256L) {
             return "file://${jpg.absolutePath}"
+        }
+        return null
+    }
+
+    fun getOfflineLyricsFile(trackId: String): File? {
+        val key = sanitizeKey(trackId)
+        val lrcInternal = File(lyricsDir, "$key.lrc")
+        if (lrcInternal.exists() && lrcInternal.length() > 8L) return lrcInternal
+        val audioFile = getLocalFile(trackId)
+        if (audioFile != null) {
+            val sidecar = File(audioFile.parentFile, "${audioFile.nameWithoutExtension}.lrc")
+            if (sidecar.exists() && sidecar.length() > 8L) return sidecar
         }
         return null
     }
@@ -263,6 +284,11 @@ class MusicDownloadManager private constructor(private val context: Context) {
             val thumbFile = File(thumbnailsDir, "$key.jpg")
             if (thumbFile.exists()) {
                 thumbFile.delete()
+            }
+            // Delete offline Enhanced LRC sidecar
+            val lrcFile = File(lyricsDir, "$key.lrc")
+            if (lrcFile.exists()) {
+                lrcFile.delete()
             }
         }
 
@@ -532,6 +558,12 @@ class MusicDownloadManager private constructor(private val context: Context) {
             location = locationMode
         ) ?: return@withContext null
 
+        // 4. Automatically fetch and save Enhanced LRC (Word-by-Word / Syllable Sync) for offline playback
+        try {
+            saveOfflineEnhancedLyricsForTrack(track, key, savedFile)
+        } catch (_: Exception) {
+        }
+
         val entity = DownloadedTrackEntity(
             id = track.id,
             title = track.title,
@@ -545,6 +577,45 @@ class MusicDownloadManager private constructor(private val context: Context) {
         )
         dao.upsertDownloadedTrack(entity)
         entity
+    }
+
+    private suspend fun saveOfflineEnhancedLyricsForTrack(
+        track: MusicItem,
+        key: String,
+        savedAudioFile: File
+    ) = withContext(Dispatchers.IO) {
+        val settings = LyricsSettingsStore.getInstance(context).state.value
+        val durParts = (track.duration ?: "3:45").split(":").mapNotNull { it.trim().toIntOrNull() }
+        val durationSec = when (durParts.size) {
+            2 -> durParts[0] * 60 + durParts[1]
+            3 -> durParts[0] * 3600 + durParts[1] * 60 + durParts[2]
+            else -> 210
+        }
+        val (_, lines) = LyricsRepository.getLyrics(
+            context = context,
+            videoId = track.videoId ?: track.id,
+            title = track.title,
+            artist = track.cleanArtist,
+            album = null,
+            durationMs = durationSec * 1000L,
+            localFilePathOrUri = savedAudioFile.absolutePath,
+            enabledSources = settings.enabledSources,
+            sourceOrder = settings.sourceOrder,
+            prioritizeSyllableSync = settings.prioritizeSyllableSync,
+            paxSenixApiKey = settings.paxSenixApiKey,
+        )
+        if (lines.isNotEmpty()) {
+            val lrcText = lines.toEnhancedLrc() ?: lines.toLrc()
+            if (!lrcText.isNullOrBlank()) {
+                val internalLrc = File(lyricsDir, "$key.lrc")
+                internalLrc.writeText(lrcText, Charsets.UTF_8)
+                val sidecarLrc = File(savedAudioFile.parentFile, "${savedAudioFile.nameWithoutExtension}.lrc")
+                try {
+                    sidecarLrc.writeText(lrcText, Charsets.UTF_8)
+                } catch (_: Exception) {
+                }
+            }
+        }
     }
 
     private fun saveTempFileToTargetStorage(
@@ -696,6 +767,19 @@ class MusicDownloadManager private constructor(private val context: Context) {
                     }
                 } catch (_: Exception) {
                 }
+            }
+            // Keep sidecar .lrc synced with new audio file location if internal .lrc exists
+            try {
+                val internalLrc = File(lyricsDir, "$key.lrc")
+                val updatedPath = dao.getDownloadedTrackById(entity.id)?.localFilePath
+                if (internalLrc.exists() && !updatedPath.isNullOrBlank()) {
+                    val newAudioFile = File(updatedPath.removePrefix("file://"))
+                    if (newAudioFile.parentFile?.exists() == true) {
+                        val sidecar = File(newAudioFile.parentFile, "${newAudioFile.nameWithoutExtension}.lrc")
+                        internalLrc.copyTo(sidecar, overwrite = true)
+                    }
+                }
+            } catch (_: Exception) {
             }
         }
 

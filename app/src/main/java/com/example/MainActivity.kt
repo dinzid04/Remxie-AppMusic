@@ -51,6 +51,10 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.data.lyrics.LyricLine as BitChordLyricLine
+import com.example.data.lyrics.LyricsProviderState
+import com.example.data.lyrics.LyricsSettingsState
+import com.example.data.lyrics.LyricsSource
 import com.example.data.model.ActiveDownloadProgress
 import com.example.data.model.LyricsData
 import com.example.data.model.LyricsProvider
@@ -162,6 +166,18 @@ fun BitChordApp(
     val activePlayerSubView by homeViewModel.activePlayerSubView.collectAsStateWithLifecycle()
     val currentLyrics by homeViewModel.currentLyrics.collectAsStateWithLifecycle()
     val selectedLyricsProvider by homeViewModel.selectedLyricsProvider.collectAsStateWithLifecycle()
+    val lyricsSettings by homeViewModel.lyricsSettings.collectAsStateWithLifecycle()
+    val bitChordLyricsLines by homeViewModel.bitChordLyricsLines.collectAsStateWithLifecycle()
+    val activeLyricsSource by homeViewModel.activeLyricsSource.collectAsStateWithLifecycle()
+    val isEmbeddedLyrics by homeViewModel.isEmbeddedLyrics.collectAsStateWithLifecycle()
+    val isLoadingLyrics by homeViewModel.isLoadingLyrics.collectAsStateWithLifecycle()
+    val lyricsProviderStates by homeViewModel.lyricsProviderStates.collectAsStateWithLifecycle()
+    val lyricsProviderResults by homeViewModel.lyricsProviderResults.collectAsStateWithLifecycle()
+    val translatedLyrics by homeViewModel.translatedLyrics.collectAsStateWithLifecycle()
+    val romanizedLyrics by homeViewModel.romanizedLyrics.collectAsStateWithLifecycle()
+    val isTranslationEnabled by homeViewModel.isTranslationEnabled.collectAsStateWithLifecycle()
+    val isRomanizationEnabled by homeViewModel.isRomanizationEnabled.collectAsStateWithLifecycle()
+    val isTranslatingLyrics by homeViewModel.isTranslatingLyrics.collectAsStateWithLifecycle()
     val customCoverOverrides by homeViewModel.customCoverOverrides.collectAsStateWithLifecycle()
     val isVideoModeActive by homeViewModel.isVideoModeActive.collectAsStateWithLifecycle()
     val activeVideoStreamUrl by homeViewModel.activeVideoStreamUrl.collectAsStateWithLifecycle()
@@ -452,7 +468,18 @@ fun BitChordApp(
                 ytMusicConnected = youtubeMusicAccount.isConnected,
                 downloadStorageLocation = downloadStorageLocation,
                 onSelectDownloadStorageLocation = homeViewModel::setDownloadStorageLocation,
-                downloadedTracksCount = downloadedTracks.size
+                downloadedTracksCount = downloadedTracks.size,
+                lyricsSettings = lyricsSettings,
+                onToggleLyricsSourceEnabled = homeViewModel::toggleLyricsSourceEnabled,
+                onMoveLyricsSourceOrder = homeViewModel::moveLyricsSourceOrder,
+                onTogglePrioritizeSyllable = homeViewModel::setPrioritizeSyllableSync,
+                onSavePaxSenixApiKey = homeViewModel::savePaxSenixApiKey,
+                onResetLyricsSourcesDefault = homeViewModel::resetLyricsSourcesToDefault,
+                onChangeLyricsOffsetMs = homeViewModel::setCurrentTrackLyricsOffsetMs,
+                onSelectTranslationLanguage = homeViewModel::setLyricsTranslationLanguage,
+                onSetSyncedLyricsEnabled = homeViewModel::setSyncedLyricsEnabled,
+                onSetLyricsBlurEnabled = homeViewModel::setLyricsBlurEnabled,
+                onSetReduceLyricsAnimation = homeViewModel::setReduceLyricsAnimation
             )
         }
 
@@ -653,7 +680,29 @@ fun BitChordApp(
                 onCancelSleepTimer = homeViewModel::cancelSleepTimer,
                 onOpenArtistProfile = { artistName, thumbUrl ->
                     homeViewModel.openArtistProfileByName(artistName, thumbUrl)
-                }
+                },
+                bitChordLyricsLines = bitChordLyricsLines,
+                translatedLyricsLines = translatedLyrics,
+                romanizedLyricsLines = romanizedLyrics,
+                isTranslationEnabled = isTranslationEnabled,
+                isRomanizationEnabled = isRomanizationEnabled,
+                isTranslatingLyrics = isTranslatingLyrics,
+                activeLyricsSource = activeLyricsSource,
+                isEmbeddedLyrics = isEmbeddedLyrics,
+                isLoadingLyrics = isLoadingLyrics,
+                lyricsSettings = lyricsSettings,
+                lyricsProviderStates = lyricsProviderStates,
+                lyricsProviderResults = lyricsProviderResults,
+                onSelectBitChordLyricsSource = homeViewModel::selectBitChordLyricsSource,
+                onToggleLyricsSourceEnabled = homeViewModel::toggleLyricsSourceEnabled,
+                onMoveLyricsSourceOrder = homeViewModel::moveLyricsSourceOrder,
+                onTogglePrioritizeSyllable = homeViewModel::setPrioritizeSyllableSync,
+                onSavePaxSenixApiKey = homeViewModel::savePaxSenixApiKey,
+                onResetLyricsSourcesDefault = homeViewModel::resetLyricsSourcesToDefault,
+                onChangeTrackLyricsOffsetMs = homeViewModel::setCurrentTrackLyricsOffsetMs,
+                onToggleLyricsTranslation = homeViewModel::toggleLyricsTranslation,
+                onToggleLyricsRomanization = homeViewModel::toggleLyricsRomanization,
+                onSelectTranslationLanguage = homeViewModel::setLyricsTranslationLanguage
             )
         }
     }
@@ -722,7 +771,29 @@ private fun IsolatedFullMusicPlayerHost(
     onSetSleepTimerMinutes: (Int, String) -> Unit,
     onSetSleepTimerEndOfTrack: () -> Unit,
     onCancelSleepTimer: () -> Unit,
-    onOpenArtistProfile: (String, String) -> Unit
+    onOpenArtistProfile: (String, String) -> Unit,
+    bitChordLyricsLines: List<BitChordLyricLine>,
+    translatedLyricsLines: List<BitChordLyricLine>?,
+    romanizedLyricsLines: List<BitChordLyricLine>?,
+    isTranslationEnabled: Boolean,
+    isRomanizationEnabled: Boolean,
+    isTranslatingLyrics: Boolean,
+    activeLyricsSource: LyricsSource?,
+    isEmbeddedLyrics: Boolean,
+    isLoadingLyrics: Boolean,
+    lyricsSettings: LyricsSettingsState,
+    lyricsProviderStates: Map<LyricsSource, LyricsProviderState>,
+    lyricsProviderResults: Map<LyricsSource, List<BitChordLyricLine>>,
+    onSelectBitChordLyricsSource: (LyricsSource) -> Unit,
+    onToggleLyricsSourceEnabled: (LyricsSource) -> Unit,
+    onMoveLyricsSourceOrder: (Int, Int) -> Unit,
+    onTogglePrioritizeSyllable: (Boolean) -> Unit,
+    onSavePaxSenixApiKey: (String) -> Unit,
+    onResetLyricsSourcesDefault: () -> Unit,
+    onChangeTrackLyricsOffsetMs: (Int) -> Unit,
+    onToggleLyricsTranslation: () -> Unit,
+    onToggleLyricsRomanization: () -> Unit,
+    onSelectTranslationLanguage: (String) -> Unit
 ) {
     val playerState by playerStateFlow.collectAsStateWithLifecycle()
     val currentId = playerState.currentTrack?.id
@@ -771,6 +842,28 @@ private fun IsolatedFullMusicPlayerHost(
         onSetSleepTimerMinutes = onSetSleepTimerMinutes,
         onSetSleepTimerEndOfTrack = onSetSleepTimerEndOfTrack,
         onCancelSleepTimer = onCancelSleepTimer,
-        onOpenArtistProfile = onOpenArtistProfile
+        onOpenArtistProfile = onOpenArtistProfile,
+        bitChordLyricsLines = bitChordLyricsLines,
+        translatedLyricsLines = translatedLyricsLines,
+        romanizedLyricsLines = romanizedLyricsLines,
+        isTranslationEnabled = isTranslationEnabled,
+        isRomanizationEnabled = isRomanizationEnabled,
+        isTranslatingLyrics = isTranslatingLyrics,
+        activeLyricsSource = activeLyricsSource,
+        isEmbeddedLyrics = isEmbeddedLyrics,
+        isLoadingLyrics = isLoadingLyrics,
+        lyricsSettings = lyricsSettings,
+        lyricsProviderStates = lyricsProviderStates,
+        lyricsProviderResults = lyricsProviderResults,
+        onSelectBitChordLyricsSource = onSelectBitChordLyricsSource,
+        onToggleLyricsSourceEnabled = onToggleLyricsSourceEnabled,
+        onMoveLyricsSourceOrder = onMoveLyricsSourceOrder,
+        onTogglePrioritizeSyllable = onTogglePrioritizeSyllable,
+        onSavePaxSenixApiKey = onSavePaxSenixApiKey,
+        onResetLyricsSourcesDefault = onResetLyricsSourcesDefault,
+        onChangeTrackLyricsOffsetMs = onChangeTrackLyricsOffsetMs,
+        onToggleLyricsTranslation = onToggleLyricsTranslation,
+        onToggleLyricsRomanization = onToggleLyricsRomanization,
+        onSelectTranslationLanguage = onSelectTranslationLanguage
     )
 }

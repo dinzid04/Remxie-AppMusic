@@ -28,9 +28,15 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import com.example.data.lyrics.LyricsSettingsState
+import com.example.data.lyrics.LyricsSource
+import com.example.data.lyrics.translationLanguageName
 import com.example.data.model.ConnectedAccountState
 import com.example.data.model.IntegrationPlatform
 import com.example.data.model.SpotifyImportProgressState
+import com.example.ui.components.LyricsOffsetSheet
+import com.example.ui.components.LyricsSourcesDialog
+import com.example.ui.components.TranslationLanguageDialog
 
 @Composable
 fun SettingsScreen(
@@ -40,10 +46,24 @@ fun SettingsScreen(
     ytMusicConnected: Boolean,
     downloadStorageLocation: com.example.player.DownloadStorageLocation = com.example.player.DownloadStorageLocation.APP_INTERNAL,
     onSelectDownloadStorageLocation: (com.example.player.DownloadStorageLocation) -> Unit = {},
-    downloadedTracksCount: Int = 0
+    downloadedTracksCount: Int = 0,
+    lyricsSettings: LyricsSettingsState = LyricsSettingsState(),
+    onToggleLyricsSourceEnabled: (LyricsSource) -> Unit = {},
+    onMoveLyricsSourceOrder: (Int, Int) -> Unit = { _, _ -> },
+    onTogglePrioritizeSyllable: (Boolean) -> Unit = {},
+    onSavePaxSenixApiKey: (String) -> Unit = {},
+    onResetLyricsSourcesDefault: () -> Unit = {},
+    onChangeLyricsOffsetMs: (Int) -> Unit = {},
+    onSelectTranslationLanguage: (String) -> Unit = {},
+    onSetSyncedLyricsEnabled: (Boolean) -> Unit = {},
+    onSetLyricsBlurEnabled: (Boolean) -> Unit = {},
+    onSetReduceLyricsAnimation: (Boolean) -> Unit = {}
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
     var soonMessage by remember { mutableStateOf<String?>(null) }
+    var showLyricsSourcesDialog by remember { mutableStateOf(false) }
+    var showLyricsOffsetSheet by remember { mutableStateOf(false) }
+    var showTranslationLanguageDialog by remember { mutableStateOf(false) }
 
     BackHandler(onBack = onBack)
 
@@ -221,6 +241,76 @@ fun SettingsScreen(
                 }
             }
 
+            // BitChord Lyrics Engine & Multi-Provider Section
+            item {
+                SettingsSectionHeader("BitChord Lyrics Engine & Providers")
+                SettingsGroupCard {
+                    SettingsRowItem(
+                        icon = Icons.Outlined.Tune,
+                        iconTint = Color(0xFFFF4D6D),
+                        title = "Sumber & Prioritas Lirik (15+ Providers)",
+                        subtitle = "${lyricsSettings.enabledSources.size} sumber aktif • Urutan: ${lyricsSettings.sourceOrder.take(3).joinToString(", ") { it.displayName }}...",
+                        isSoon = false,
+                        activeBadgeText = "${lyricsSettings.enabledSources.size} Aktif",
+                        onClick = { showLyricsSourcesDialog = true },
+                        testTag = "settings_lyrics_sources_row"
+                    )
+                    SettingsDivider()
+                    val offsetSec = lyricsSettings.globalOffsetMs / 1000f
+                    SettingsRowItem(
+                        icon = Icons.Outlined.Schedule,
+                        iconTint = Color(0xFF4DD0E1),
+                        title = "Offset Waktu Lirik (Timing Sync)",
+                        subtitle = "Sesuaikan jeda waktu lirik (-5.0s s/d +5.0s)",
+                        isSoon = false,
+                        activeBadgeText = if (lyricsSettings.globalOffsetMs == 0) "0.0s" else "%+.1fs".format(offsetSec),
+                        onClick = { showLyricsOffsetSheet = true },
+                        testTag = "settings_lyrics_offset_row"
+                    )
+                    SettingsDivider()
+                    SettingsRowItem(
+                        icon = Icons.Outlined.Translate,
+                        iconTint = Color(0xFFBA68C8),
+                        title = "Bahasa Terjemahan & Romanisasi",
+                        subtitle = "Target bahasa terjemahan otomatis: ${translationLanguageName(lyricsSettings.translationLanguage)}",
+                        isSoon = false,
+                        activeBadgeText = lyricsSettings.translationLanguage.uppercase(),
+                        onClick = { showTranslationLanguageDialog = true },
+                        testTag = "settings_lyrics_translation_lang_row"
+                    )
+                    SettingsDivider()
+                    SettingsSwitchRowItem(
+                        icon = Icons.Outlined.Lyrics,
+                        iconTint = Color(0xFF38EF7D),
+                        title = "Lirik Tersinkronisasi (Synced & Word-Sync)",
+                        subtitle = "Jalankan lirik otomatis mengikuti ketukan & suku kata lagu",
+                        checked = lyricsSettings.syncedLyrics,
+                        onCheckedChange = onSetSyncedLyricsEnabled,
+                        testTag = "settings_synced_lyrics_switch"
+                    )
+                    SettingsDivider()
+                    SettingsSwitchRowItem(
+                        icon = Icons.Outlined.AutoAwesome,
+                        iconTint = Color(0xFFFFB74D),
+                        title = "Utamakan Lirik Per Suku Kata (Syllable TTML)",
+                        subtitle = "Prioritaskan provider Apple Music TTML, Musixmatch RichSync & KuGou HRC",
+                        checked = lyricsSettings.prioritizeSyllableSync,
+                        onCheckedChange = onTogglePrioritizeSyllable,
+                        testTag = "settings_prioritize_syllable_switch"
+                    )
+                    SettingsDivider()
+                    SettingsSwitchRowItem(
+                        icon = Icons.Outlined.BlurOn,
+                        iconTint = Color(0xFF64B5F6),
+                        title = "Efek Blur Baris Lirik Non-Aktif",
+                        subtitle = "Berikan efek kedalaman blur halus pada baris lirik yang jauh",
+                        checked = lyricsSettings.lyricsBlur,
+                        onCheckedChange = onSetLyricsBlurEnabled,
+                        testTag = "settings_lyrics_blur_switch"
+                    )
+                }
+            }
+
             // Interface Section
             item {
                 SettingsSectionHeader("Interface")
@@ -238,9 +328,10 @@ fun SettingsScreen(
                         icon = Icons.Outlined.FormatSize,
                         iconTint = Color(0xFF64B5F6),
                         title = "Player & Lyrics UI",
-                        subtitle = "Configure blur effects, lyric font size & animations",
-                        isSoon = true,
-                        onClick = { soonMessage = "Player & Lyrics UI settings coming soon!" }
+                        subtitle = "Atur sumber lirik, efek blur, dan sinkronisasi waktu",
+                        isSoon = false,
+                        activeBadgeText = "Active",
+                        onClick = { showLyricsSourcesDialog = true }
                     )
                 }
             }
@@ -271,9 +362,10 @@ fun SettingsScreen(
                         icon = Icons.Outlined.AutoAwesome,
                         iconTint = Color(0xFFBA68C8),
                         title = "AI & Translations",
-                        subtitle = "Real-time lyric translations and romanization",
-                        isSoon = true,
-                        onClick = { soonMessage = "AI & Translations coming soon!" }
+                        subtitle = "Aktif: ${translationLanguageName(lyricsSettings.translationLanguage)} • Terjemahan & Romanisasi",
+                        isSoon = false,
+                        activeBadgeText = lyricsSettings.translationLanguage.uppercase(),
+                        onClick = { showTranslationLanguageDialog = true }
                     )
                 }
             }
@@ -359,6 +451,98 @@ fun SettingsScreen(
                 }
             }
         }
+    }
+
+    if (showLyricsSourcesDialog) {
+        LyricsSourcesDialog(
+            settings = lyricsSettings,
+            onToggleSource = onToggleLyricsSourceEnabled,
+            onMoveSource = onMoveLyricsSourceOrder,
+            onTogglePrioritizeSyllable = onTogglePrioritizeSyllable,
+            onSavePaxSenixApiKey = onSavePaxSenixApiKey,
+            onResetDefault = onResetLyricsSourcesDefault,
+            onDismiss = { showLyricsSourcesDialog = false }
+        )
+    }
+
+    if (showLyricsOffsetSheet) {
+        LyricsOffsetSheet(
+            currentOffsetMs = lyricsSettings.globalOffsetMs,
+            onChangeOffsetMs = onChangeLyricsOffsetMs,
+            onDismiss = { showLyricsOffsetSheet = false }
+        )
+    }
+
+    if (showTranslationLanguageDialog) {
+        TranslationLanguageDialog(
+            selectedCode = lyricsSettings.translationLanguage,
+            onSelectLanguage = { code ->
+                onSelectTranslationLanguage(code)
+                showTranslationLanguageDialog = false
+            },
+            onDismiss = { showTranslationLanguageDialog = false }
+        )
+    }
+}
+
+@Composable
+private fun SettingsSwitchRowItem(
+    icon: ImageVector,
+    iconTint: Color,
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    testTag: String = ""
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onCheckedChange(!checked) }
+            .padding(horizontal = 16.dp, vertical = 14.dp)
+            .then(if (testTag.isNotBlank()) Modifier.testTag(testTag) else Modifier),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(38.dp)
+                .clip(RoundedCornerShape(11.dp))
+                .background(iconTint.copy(alpha = 0.14f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = iconTint,
+                modifier = Modifier.size(20.dp)
+            )
+        }
+        Spacer(modifier = Modifier.width(14.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                color = Color.White,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = subtitle,
+                color = Color(0xFF9EA3B0),
+                fontSize = 12.sp,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        Spacer(modifier = Modifier.width(10.dp))
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = Color.White,
+                checkedTrackColor = Color(0xFFFF4D6D)
+            )
+        )
     }
 }
 

@@ -255,8 +255,94 @@ data class LyricsData(
     val hdCoverUrl: String? = null,
     val lrcSongId: String? = null,
     val accentColorHex: String? = null,
-    val songwriters: List<String> = emptyList()
-)
+    val songwriters: List<String> = emptyList(),
+    val bitChordLines: List<com.example.data.lyrics.LyricLine> = emptyList(),
+    val winningSource: com.example.data.lyrics.LyricsSource? = null,
+    val isEmbedded: Boolean = false
+) {
+    companion object {
+        fun fromBitChord(
+            videoId: String,
+            bitChordLines: List<com.example.data.lyrics.LyricLine>,
+            winningSource: com.example.data.lyrics.LyricsSource?,
+            isEmbedded: Boolean = false,
+            fallbackLyricsData: LyricsData? = null
+        ): LyricsData {
+            val nonGap = bitChordLines.filter { !it.isGap }
+            val hasTimestamps = nonGap.any { it.timeMs > 0L || it.isWordSynced }
+            val convertedSynced = nonGap.mapIndexed { idx, bLine ->
+                val nextStartMs = nonGap.getOrNull(idx + 1)?.timeMs
+                val bEndMs = bLine.endMs(nextStartMs)
+                val wordsConverted = bLine.words.flatMap { w ->
+                    if (w.syllables.isNotEmpty()) {
+                        w.syllables.map { syl ->
+                            val sIdx = syl.startChar.coerceIn(0, w.text.length)
+                            val eIdx = syl.endChar.coerceIn(sIdx, w.text.length)
+                            LyricWord(
+                                text = w.text.substring(sIdx, eIdx),
+                                beginSec = syl.startMs / 1000.0,
+                                endSec = syl.endMs / 1000.0
+                            )
+                        }
+                    } else {
+                        listOf(
+                            LyricWord(
+                                text = w.text,
+                                beginSec = w.startMs / 1000.0,
+                                endSec = w.endMs / 1000.0
+                            )
+                        )
+                    }
+                }
+                val bg = bLine.background
+                val bgWordsConverted = bg?.words?.map { w ->
+                    LyricWord(
+                        text = w.text,
+                        beginSec = w.startMs / 1000.0,
+                        endSec = w.endMs / 1000.0
+                    )
+                } ?: emptyList()
+
+                LyricLine(
+                    text = bLine.text,
+                    beginSec = if (hasTimestamps) bLine.timeMs / 1000.0 else null,
+                    endSec = if (hasTimestamps) bEndMs / 1000.0 else null,
+                    words = wordsConverted,
+                    bgText = bg?.text,
+                    bgBeginSec = bg?.timeMs?.let { it / 1000.0 },
+                    bgEndSec = bg?.endMs(null)?.let { it / 1000.0 },
+                    bgWords = bgWordsConverted,
+                    part = if (bLine.alignment == com.example.data.lyrics.LyricAlignment.End) "v2" else "v1"
+                )
+            }
+            val credit = when {
+                isEmbedded -> "Lirik Offline (Embedded .lrc)"
+                winningSource != null -> "Lirik oleh ${winningSource.displayName}"
+                fallbackLyricsData != null -> fallbackLyricsData.source
+                else -> "Lirik oleh BitChord Engine"
+            }
+            return LyricsData(
+                videoId = videoId,
+                lines = nonGap.map { it.text }.ifEmpty { fallbackLyricsData?.lines ?: listOf("Lirik belum tersedia untuk lagu ini.") },
+                syncedLines = if (hasTimestamps) convertedSynced else emptyList(),
+                isSynced = hasTimestamps,
+                source = credit,
+                provider = if (winningSource == com.example.data.lyrics.LyricsSource.YOUTUBE_MUSIC || winningSource == com.example.data.lyrics.LyricsSource.YOUTUBE_TRANSCRIPT) {
+                    LyricsProvider.YOUTUBE_MUSIC
+                } else {
+                    LyricsProvider.LRC_RED
+                },
+                hdCoverUrl = fallbackLyricsData?.hdCoverUrl,
+                lrcSongId = fallbackLyricsData?.lrcSongId,
+                accentColorHex = fallbackLyricsData?.accentColorHex,
+                songwriters = fallbackLyricsData?.songwriters ?: emptyList(),
+                bitChordLines = bitChordLines,
+                winningSource = winningSource,
+                isEmbedded = isEmbedded
+            )
+        }
+    }
+}
 
 @Immutable
 data class PlaylistDetail(
